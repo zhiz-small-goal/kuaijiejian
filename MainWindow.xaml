@@ -1,0 +1,362 @@
+<Window x:Class="Kuaijiejian.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:Kuaijiejian"
+        mc:Ignorable="d"
+        Title="快捷键管理" 
+        Icon="app.ico"
+        SizeToContent="WidthAndHeight"
+        MaxWidth="6000"
+        WindowStartupLocation="Manual"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ResizeMode="CanResize"
+        Visibility="Visible"
+        Topmost="True"
+        WindowState="Normal">
+    
+    <Window.Resources>
+        <!-- 颜色转换器 -->
+        <local:HexToColorConverter x:Key="ColorConverter"/>
+        
+        <!-- 按钮样式 - 支持自定义颜色和主题颜色 -->
+        <Style x:Key="FunctionButtonStyle" TargetType="Button">
+            <Setter Property="Background" Value="{DynamicResource ButtonBackgroundBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource ButtonBorderBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource ButtonTextBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Margin" Value="4,4,4,4"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Height" Value="25"/>
+            <Setter Property="Width" Value="45"/>
+            <Setter Property="HorizontalAlignment" Value="Center"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="buttonBorder"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="5"
+                                ClipToBounds="True">
+                            <Border.Effect>
+                                <DropShadowEffect ShadowDepth="2" 
+                                                  BlurRadius="8" 
+                                                  Opacity="0.15"
+                                                  Direction="270"/>
+                            </Border.Effect>
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"
+                                              Margin="4,2,4,2"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <!-- 自定义颜色：默认状态 -->
+                <DataTrigger Binding="{Binding HasCustomColor}" Value="True">
+                    <Setter Property="Background">
+                        <Setter.Value>
+                            <SolidColorBrush Color="{Binding CustomColor, Converter={StaticResource ColorConverter}}"/>
+                        </Setter.Value>
+                    </Setter>
+                    <Setter Property="Foreground" Value="White"/>
+                    <Setter Property="BorderBrush">
+                        <Setter.Value>
+                            <SolidColorBrush Color="{Binding CustomColor, Converter={StaticResource ColorConverter}}"/>
+                        </Setter.Value>
+                    </Setter>
+                </DataTrigger>
+                
+                <!-- 鼠标悬停效果 -->
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Opacity" Value="0.85"/>
+                </Trigger>
+                
+                <!-- 鼠标按下效果 -->
+                <Trigger Property="IsPressed" Value="True">
+                    <Setter Property="Opacity" Value="0.7"/>
+                </Trigger>
+                
+                <!-- 无自定义颜色时的悬停效果 -->
+                <MultiDataTrigger>
+                    <MultiDataTrigger.Conditions>
+                        <Condition Binding="{Binding HasCustomColor}" Value="False"/>
+                        <Condition Binding="{Binding RelativeSource={RelativeSource Self}, Path=IsMouseOver}" Value="True"/>
+                    </MultiDataTrigger.Conditions>
+                    <Setter Property="Background" Value="{DynamicResource ButtonHoverBackgroundBrush}"/>
+                </MultiDataTrigger>
+                
+                <!-- 无自定义颜色时的按下效果 -->
+                <MultiDataTrigger>
+                    <MultiDataTrigger.Conditions>
+                        <Condition Binding="{Binding HasCustomColor}" Value="False"/>
+                        <Condition Binding="{Binding RelativeSource={RelativeSource Self}, Path=IsPressed}" Value="True"/>
+                    </MultiDataTrigger.Conditions>
+                    <Setter Property="Background" Value="{DynamicResource ButtonActiveBackgroundBrush}"/>
+                </MultiDataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- 区域标题样式 -->
+        <Style x:Key="SectionTitleStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="16"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Foreground" Value="#374151"/>
+            <Setter Property="Margin" Value="0,0,0,0"/>
+        </Style>
+    </Window.Resources>
+    
+    <!-- 窗口拖动支持 - 移除标题栏后禁用默认拖动 -->
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="0"
+                      GlassFrameThickness="0"
+                      ResizeBorderThickness="5"
+                      UseAeroCaptionButtons="False"/>
+    </WindowChrome.WindowChrome>
+    
+    <!-- 圆角边框容器 -->
+    <Border x:Name="WindowBorder"
+            Background="#FFFFFF"
+            BorderThickness="0"
+            CornerRadius="15"
+            SizeChanged="WindowBorder_SizeChanged">
+        <Border.Effect>
+            <DropShadowEffect ShadowDepth="0" 
+                              BlurRadius="30" 
+                              Opacity="0.3"
+                              Color="#000000"/>
+        </Border.Effect>
+        
+    <Grid ClipToBounds="True">
+        <!-- 主内容区域 - 单一区域 -->
+        <Border x:Name="MainAreaBorder"
+                CornerRadius="15"
+                Padding="18,15,18,15"
+                Margin="0,0,0,0"
+                MouseLeftButtonDown="MainAreaBorder_MouseLeftButtonDown"
+                HorizontalAlignment="Stretch">
+            <Border.Background>
+                <LinearGradientBrush x:Name="MainAreaGradient" StartPoint="0,0" EndPoint="0,1">
+                    <GradientStop x:Name="MainAreaStart" Color="#e5e7eb" Offset="0"/>
+                    <GradientStop x:Name="MainAreaEnd" Color="#9ca3af" Offset="1"/>
+                </LinearGradientBrush>
+            </Border.Background>
+            
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>  <!-- 标题+操作栏 -->
+                    <RowDefinition Height="Auto"/>  <!-- 按钮区域，根据内容自适应 -->
+                </Grid.RowDefinitions>
+                
+                <!-- 标题 + 操作按钮 -->
+                <Grid Grid.Row="0" Margin="0,0,0,12" MinHeight="28">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    
+                    <TextBlock x:Name="MainSectionTitle"
+                               Grid.Column="0"
+                               Text="功能" 
+                               Style="{StaticResource SectionTitleStyle}"
+                               Margin="0"
+                               HorizontalAlignment="Left"
+                               VerticalAlignment="Center"/>
+                    
+                    <!-- 操作按钮组 -->
+                    <StackPanel Grid.Column="1"
+                                Orientation="Horizontal" 
+                                Margin="16,0,0,0"
+                                HorizontalAlignment="Right" 
+                                VerticalAlignment="Center">
+                        <!-- 批量删除按钮 -->
+                        <Button Click="BatchDeleteAllFunctions_Click"
+                                Width="24" Height="24"
+                                Margin="0,0,8,0"
+                                ToolTip="批量删除">
+                            <Button.Style>
+                                <Style TargetType="Button">
+                                    <Setter Property="Background" Value="#FEF2F2"/>
+                                    <Setter Property="BorderBrush" Value="#FCA5A5"/>
+                                    <Setter Property="BorderThickness" Value="1.5"/>
+                                    <Setter Property="Cursor" Value="Hand"/>
+                                    <Setter Property="Template">
+                                        <Setter.Value>
+                                            <ControlTemplate TargetType="Button">
+                                                <Border Background="{TemplateBinding Background}"
+                                                        BorderBrush="{TemplateBinding BorderBrush}"
+                                                        BorderThickness="{TemplateBinding BorderThickness}"
+                                                        CornerRadius="6">
+                                                    <TextBlock Text="🥚" FontSize="11" 
+                                                               HorizontalAlignment="Center" 
+                                                               VerticalAlignment="Center"
+                                                               Margin="0,0,0,1"/>
+                                                </Border>
+                                            </ControlTemplate>
+                                        </Setter.Value>
+                                    </Setter>
+                                    <Style.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter Property="Background" Value="#FEE2E2"/>
+                                            <Setter Property="BorderBrush" Value="#F87171"/>
+                                        </Trigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                        </Button>
+                        
+                        <!-- 一键清空按钮 -->
+                        <Button Click="ClearAllFunctions_Click"
+                                Width="24" Height="24"
+                                Margin="0,0,8,0"
+                                ToolTip="清空全部">
+                            <Button.Style>
+                                <Style TargetType="Button">
+                                    <Setter Property="Background" Value="#FFF7ED"/>
+                                    <Setter Property="BorderBrush" Value="#FDBA74"/>
+                                    <Setter Property="BorderThickness" Value="1.5"/>
+                                    <Setter Property="Cursor" Value="Hand"/>
+                                    <Setter Property="Template">
+                                        <Setter.Value>
+                                            <ControlTemplate TargetType="Button">
+                                                <Border Background="{TemplateBinding Background}"
+                                                        BorderBrush="{TemplateBinding BorderBrush}"
+                                                        BorderThickness="{TemplateBinding BorderThickness}"
+                                                        CornerRadius="6">
+                                                    <TextBlock Text="🍽" FontSize="11" 
+                                                               HorizontalAlignment="Center" 
+                                                               VerticalAlignment="Center"
+                                                               Margin="0,0,0,1"/>
+                                                </Border>
+                                            </ControlTemplate>
+                                        </Setter.Value>
+                                    </Setter>
+                                    <Style.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter Property="Background" Value="#FFEDD5"/>
+                                            <Setter Property="BorderBrush" Value="#FB923C"/>
+                                        </Trigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                        </Button>
+                        
+                        <!-- 添加图层功能按钮 -->
+                        <Button Click="AddSystemFunction_Click"
+                                Width="60" Height="24"
+                                Margin="0,0,8,0"
+                                ToolTip="添加图层功能">
+                            <Button.Style>
+                                <Style TargetType="Button">
+                                    <Setter Property="Background" Value="#EFF6FF"/>
+                                    <Setter Property="BorderBrush" Value="#93C5FD"/>
+                                    <Setter Property="BorderThickness" Value="1.5"/>
+                                    <Setter Property="Cursor" Value="Hand"/>
+                                    <Setter Property="Template">
+                                        <Setter.Value>
+                                            <ControlTemplate TargetType="Button">
+                                                <Border Background="{TemplateBinding Background}"
+                                                        BorderBrush="{TemplateBinding BorderBrush}"
+                                                        BorderThickness="{TemplateBinding BorderThickness}"
+                                                        CornerRadius="6">
+                                                    <ContentPresenter HorizontalAlignment="Center" 
+                                                                      VerticalAlignment="Center"/>
+                                                </Border>
+                                            </ControlTemplate>
+                                        </Setter.Value>
+                                    </Setter>
+                                    <Style.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter Property="Background" Value="#DBEAFE"/>
+                                            <Setter Property="BorderBrush" Value="#60A5FA"/>
+                                        </Trigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                            <TextBlock Text="🔧 图层" FontSize="10" Foreground="#3B82F6" 
+                                       VerticalAlignment="Center" HorizontalAlignment="Center" FontWeight="SemiBold"/>
+                        </Button>
+                        
+                        <!-- 添加动作按钮 -->
+                        <Button Click="AddApplicationFunction_Click"
+                                Width="60" Height="24"
+                                ToolTip="添加动作功能">
+                            <Button.Style>
+                                <Style TargetType="Button">
+                                    <Setter Property="Background" Value="#F3E8FF"/>
+                                    <Setter Property="BorderBrush" Value="#C084FC"/>
+                                    <Setter Property="BorderThickness" Value="1.5"/>
+                                    <Setter Property="Cursor" Value="Hand"/>
+                                    <Setter Property="Template">
+                                        <Setter.Value>
+                                            <ControlTemplate TargetType="Button">
+                                                <Border Background="{TemplateBinding Background}"
+                                                        BorderBrush="{TemplateBinding BorderBrush}"
+                                                        BorderThickness="{TemplateBinding BorderThickness}"
+                                                        CornerRadius="6">
+                                                    <ContentPresenter HorizontalAlignment="Center" 
+                                                                      VerticalAlignment="Center"/>
+                                                </Border>
+                                            </ControlTemplate>
+                                        </Setter.Value>
+                                    </Setter>
+                                    <Style.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter Property="Background" Value="#E9D5FF"/>
+                                            <Setter Property="BorderBrush" Value="#A855F7"/>
+                                        </Trigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                            <TextBlock Text="⚡ 动作" FontSize="10" Foreground="#A855F7" 
+                                       VerticalAlignment="Center" HorizontalAlignment="Center" FontWeight="SemiBold"/>
+                        </Button>
+                    </StackPanel>
+                </Grid>
+                
+                <!-- 统一按钮列表 -->
+                <ItemsControl x:Name="AllFunctionsList" Grid.Row="1" Margin="0,0,0,0">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <UniformGrid x:Name="ButtonGrid" Columns="5"/>  <!-- 默认5列网格，可通过代码动态修改 -->
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Button Style="{StaticResource FunctionButtonStyle}"
+                                    Click="FunctionButton_Click"
+                                    Tag="{Binding}"
+                                    ToolTip="{Binding Name}"
+                                    MouseRightButtonUp="FunctionButton_RightClick"
+                                    MouseDoubleClick="FunctionButton_DoubleClick"
+                                    PreviewMouseLeftButtonDown="FunctionButton_PreviewMouseLeftButtonDown"
+                                    PreviewMouseMove="FunctionButton_PreviewMouseMove"
+                                    AllowDrop="True"
+                                    DragOver="FunctionButton_DragOver"
+                                    Drop="FunctionButton_Drop">
+                                <StackPanel>
+                                    <TextBlock Text="{Binding DisplayText}" FontSize="16" HorizontalAlignment="Center" 
+                                               Foreground="{DynamicResource ButtonIconBrush}" FontWeight="Bold"/>
+                                    <TextBlock Text="{Binding Name}" FontSize="9" FontWeight="Normal" 
+                                               Margin="0,2,0,0" HorizontalAlignment="Center"
+                                               Foreground="{DynamicResource ButtonTextBrush}" 
+                                               TextTrimming="CharacterEllipsis"/>
+                                    <TextBlock Text="{Binding Hotkey}" FontSize="8" 
+                                               HorizontalAlignment="Center" Margin="0,2,0,0"
+                                               Foreground="{DynamicResource ButtonSubTextBrush}"/>
+                                </StackPanel>
+                            </Button>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </Grid>
+        </Border>
+    </Grid>
+    </Border>
+</Window>
+

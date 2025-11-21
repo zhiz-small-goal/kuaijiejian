@@ -1,0 +1,371 @@
+<Window x:Class="Kuaijiejian.ActionSelectorWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="选择 Photoshop 动作" 
+        Height="600" 
+        Width="370"
+        WindowStartupLocation="CenterOwner"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ResizeMode="CanResize">
+
+    <Window.Resources>
+        <!-- 复选框样式 - 卡片式布局 -->
+        <Style x:Key="ActionCheckBoxStyle" TargetType="CheckBox">
+            <Setter Property="Margin" Value="0,0,0,12"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="CheckBox">
+                        <Border Background="#FAFBFC"
+                                CornerRadius="8"
+                                Padding="16,12"
+                                BorderThickness="0">
+                            <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    
+                                    <!-- 复选框 -->
+                                    <CheckBox Grid.Column="0"
+                                              IsChecked="{TemplateBinding IsChecked}"
+                                              VerticalAlignment="Top"
+                                              Margin="0,2,12,0"/>
+                                    
+                                    <!-- 内容区域 -->
+                                    <StackPanel Grid.Column="1">
+                                        <TextBlock Text="{Binding ActionInfo.ActionName}"
+                                                   FontSize="14"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="#1E293B"
+                                                   TextWrapping="Wrap"/>
+                                        <TextBlock Text="{Binding ActionInfo.ActionSetName, StringFormat='来自动作集：{0}'}"
+                                                   FontSize="12"
+                                                   Foreground="#64748B"
+                                                   Margin="0,4,0,0"
+                                                   TextWrapping="Wrap"/>
+                                    </StackPanel>
+                                </Grid>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- 按钮样式 -->
+        <Style x:Key="PrimaryButtonStyle" TargetType="Button">
+            <Setter Property="Background" Value="#8b5cf6"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="20,10"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}"
+                                CornerRadius="6"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" 
+                                              VerticalAlignment="Center"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#7c3aed"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style x:Key="SecondaryButtonStyle" TargetType="Button" BasedOn="{StaticResource PrimaryButtonStyle}">
+            <Setter Property="Background" Value="#e5e7eb"/>
+            <Setter Property="Foreground" Value="#374151"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#d1d5db"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+    </Window.Resources>
+
+    <!-- 窗口拖动支持 -->
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="40"
+                      GlassFrameThickness="0"
+                      ResizeBorderThickness="5"
+                      UseAeroCaptionButtons="False"/>
+    </WindowChrome.WindowChrome>
+
+    <!-- 主容器 -->
+    <Border Background="White"
+            CornerRadius="15"
+            BorderThickness="0"
+            ClipToBounds="True"
+            MouseLeftButtonDown="Border_MouseLeftButtonDown">
+        <Grid ClipToBounds="True">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <!-- 标题栏 -->
+            <Border Grid.Row="0" 
+                    Background="#8b5cf6"
+                    CornerRadius="15,15,0,0"
+                    Padding="20,12">
+                <Grid>
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <TextBlock Text="⚡" FontSize="18" Margin="0,0,8,0"/>
+                        <TextBlock Text="选择 Photoshop 动作" 
+                                   FontSize="16" 
+                                   FontWeight="Bold" 
+                                   Foreground="White"
+                                   VerticalAlignment="Center"
+                                   WindowChrome.IsHitTestVisibleInChrome="False"/>
+                    </StackPanel>
+
+                    <Button Content="✕"
+                            Width="30" Height="30"
+                            HorizontalAlignment="Right"
+                            Click="CloseButton_Click"
+                            WindowChrome.IsHitTestVisibleInChrome="True">
+                        <Button.Style>
+                            <Style TargetType="Button">
+                                <Setter Property="Background" Value="Transparent"/>
+                                <Setter Property="Foreground" Value="White"/>
+                                <Setter Property="BorderThickness" Value="0"/>
+                                <Setter Property="FontSize" Value="16"/>
+                                <Setter Property="Cursor" Value="Hand"/>
+                                <Setter Property="Template">
+                                    <Setter.Value>
+                                        <ControlTemplate TargetType="Button">
+                                            <Border Background="{TemplateBinding Background}"
+                                                    CornerRadius="6">
+                                                <ContentPresenter HorizontalAlignment="Center"
+                                                                  VerticalAlignment="Center"/>
+                                            </Border>
+                                        </ControlTemplate>
+                                    </Setter.Value>
+                                </Setter>
+                                <Style.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter Property="Background" Value="#E81123"/>
+                                    </Trigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                    </Button>
+                </Grid>
+            </Border>
+
+            <!-- 主内容区 -->
+            <Grid Grid.Row="1" Margin="20">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+
+                <!-- 提示信息 -->
+                <Border Grid.Row="0" 
+                        Background="#eff6ff"
+                        CornerRadius="8"
+                        BorderThickness="0"
+                        Padding="15,12"
+                        Margin="0,0,0,15">
+                    <StackPanel>
+                        <TextBlock FontSize="13" Foreground="#1e40af" TextWrapping="Wrap">
+                            <Run Text="💡 "/>
+                            <Run Text="从 Photoshop 中检测到以下动作，请选择要添加到主页面的动作："/>
+                        </TextBlock>
+                        <!-- 搜索框 -->
+                        <Border Background="#F8FAFC" CornerRadius="6" BorderThickness="0" Padding="12,10" Margin="0,10,0,0" Height="42">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                
+                                <!-- 搜索图标 -->
+                                <TextBlock Grid.Column="0" Text="🔍" FontSize="16" VerticalAlignment="Center" 
+                                           Margin="0,0,10,0" Foreground="#3b82f6"/>
+                                
+                                <!-- 输入框 -->
+                                <TextBox x:Name="SearchBox" Grid.Column="1" BorderThickness="0" Background="Transparent" 
+                                         FontSize="14" VerticalAlignment="Center" TextChanged="SearchBox_TextChanged"
+                                         Text="" Foreground="#1E293B" FontWeight="Normal">
+                                    <TextBox.Style>
+                                        <Style TargetType="TextBox">
+                                            <Setter Property="Template">
+                                                <Setter.Value>
+                                                    <ControlTemplate TargetType="TextBox">
+                                                        <Grid>
+                                                            <ScrollViewer x:Name="PART_ContentHost" VerticalAlignment="Center"/>
+                                                            <TextBlock x:Name="PlaceholderText" 
+                                                                      Text="输入关键词搜索动作..." 
+                                                                      Foreground="#94A3B8" 
+                                                                      FontSize="14"
+                                                                      VerticalAlignment="Center"
+                                                                      IsHitTestVisible="False">
+                                                                <TextBlock.Style>
+                                                                    <Style TargetType="TextBlock">
+                                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                                        <Style.Triggers>
+                                                                            <DataTrigger Binding="{Binding Text, RelativeSource={RelativeSource TemplatedParent}}" Value="">
+                                                                                <Setter Property="Visibility" Value="Visible"/>
+                                                                            </DataTrigger>
+                                                                        </Style.Triggers>
+                                                                    </Style>
+                                                                </TextBlock.Style>
+                                                            </TextBlock>
+                                                        </Grid>
+                                                    </ControlTemplate>
+                                                </Setter.Value>
+                                            </Setter>
+                                        </Style>
+                                    </TextBox.Style>
+                                </TextBox>
+                                
+                                <!-- 清除按钮 -->
+                                <Button x:Name="ClearSearchButton" Grid.Column="2" Content="✕" 
+                                        Width="24" Height="24" Margin="8,0,0,0"
+                                        Click="ClearSearch_Click" Cursor="Hand"
+                                        Visibility="Collapsed">
+                                    <Button.Style>
+                                        <Style TargetType="Button">
+                                            <Setter Property="Background" Value="Transparent"/>
+                                            <Setter Property="Foreground" Value="#94A3B8"/>
+                                            <Setter Property="BorderThickness" Value="0"/>
+                                            <Setter Property="FontSize" Value="14"/>
+                                            <Setter Property="Template">
+                                                <Setter.Value>
+                                                    <ControlTemplate TargetType="Button">
+                                                        <Border Background="{TemplateBinding Background}" 
+                                                                CornerRadius="12"
+                                                                BorderThickness="0">
+                                                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                        </Border>
+                                                    </ControlTemplate>
+                                                </Setter.Value>
+                                            </Setter>
+                                            <Style.Triggers>
+                                                <Trigger Property="IsMouseOver" Value="True">
+                                                    <Setter Property="Background" Value="#E2E8F0"/>
+                                                    <Setter Property="Foreground" Value="#475569"/>
+                                                </Trigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Button.Style>
+                                </Button>
+                            </Grid>
+                        </Border>
+                    </StackPanel>
+                </Border>
+
+                <!-- 操作按钮 -->
+                <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,10">
+                    <Button Content="全选" 
+                            Click="SelectAll_Click"
+                            Padding="12,6"
+                            Margin="0,0,8,0"
+                            Style="{StaticResource SecondaryButtonStyle}"/>
+                    <Button Content="取消全选" 
+                            Click="DeselectAll_Click"
+                            Padding="12,6"
+                            Style="{StaticResource SecondaryButtonStyle}"/>
+                    <TextBlock x:Name="CountTextBlock"
+                               Text="已选择: 0"
+                               VerticalAlignment="Center"
+                               Margin="15,0,0,0"
+                               FontSize="13"
+                               Foreground="#6b7280"/>
+                </StackPanel>
+
+                <!-- 动作列表 -->
+                <Border Grid.Row="2" 
+                        Background="#f9fafb"
+                        CornerRadius="8"
+                        BorderThickness="0">
+                    <Grid>
+                        <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                      Padding="10">
+                            <ItemsControl x:Name="ActionsListBox">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay}"
+                                                  DataContext="{Binding}"
+                                                  Tag="{Binding}"
+                                                  Checked="ActionCheckBox_Changed"
+                                                  Unchecked="ActionCheckBox_Changed"
+                                                  Style="{StaticResource ActionCheckBoxStyle}"/>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+
+                        <!-- 空状态提示 -->
+                        <StackPanel x:Name="EmptyPanel"
+                                    VerticalAlignment="Center"
+                                    HorizontalAlignment="Center"
+                                    Visibility="Collapsed">
+                            <TextBlock Text="⚠️" 
+                                       FontSize="48"
+                                       HorizontalAlignment="Center"
+                                       Opacity="0.3"/>
+                            <TextBlock Text="未检测到 Photoshop 动作" 
+                                       FontSize="14"
+                                       Foreground="#9ca3af"
+                                       HorizontalAlignment="Center"
+                                       Margin="0,10,0,5"/>
+                            <TextBlock Text="请确保 Photoshop 已打开并加载了动作" 
+                                       FontSize="12"
+                                       Foreground="#d1d5db"
+                                       HorizontalAlignment="Center"/>
+                        </StackPanel>
+
+                        <!-- 加载提示 -->
+                        <StackPanel x:Name="LoadingPanel"
+                                    VerticalAlignment="Center"
+                                    HorizontalAlignment="Center"
+                                    Visibility="Visible">
+                            <TextBlock Text="⏳" 
+                                       FontSize="48"
+                                       HorizontalAlignment="Center"/>
+                            <TextBlock Text="正在从 Photoshop 加载动作..." 
+                                       FontSize="14"
+                                       Foreground="#6b7280"
+                                       HorizontalAlignment="Center"
+                                       Margin="0,10,0,0"/>
+                        </StackPanel>
+                    </Grid>
+                </Border>
+            </Grid>
+
+            <!-- 底部按钮 -->
+            <Border Grid.Row="2" 
+                    Background="#f9fafb"
+                    BorderBrush="#e5e7eb"
+                    BorderThickness="0,1,0,0"
+                    CornerRadius="0,0,15,15"
+                    Padding="20,15">
+                <StackPanel Orientation="Horizontal" 
+                            HorizontalAlignment="Right">
+                    <Button Content="取消" 
+                            Click="CloseButton_Click"
+                            Margin="0,0,10,0"
+                            Style="{StaticResource SecondaryButtonStyle}"/>
+                    <Button Content="添加选中的动作" 
+                            Click="AddButton_Click"
+                            Style="{StaticResource PrimaryButtonStyle}"/>
+                </StackPanel>
+            </Border>
+        </Grid>
+    </Border>
+</Window>
+
+

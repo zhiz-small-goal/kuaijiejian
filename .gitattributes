@@ -1,0 +1,47 @@
+# Auto detect text files and perform LF normalization
+* text=auto
+
+# Source code
+*.cs text diff=csharp
+*.csproj text
+*.xaml text
+*.jsx text
+
+# Documentation
+*.md text
+*.txt text
+
+# Windows files
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary files
+*.dll binary
+*.exe binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+
+# Archives
+*.zip binary
+*.7z binary
+*.tar binary
+*.gz binary
+
+# Export ignore (files that should not be included in release archives)
+.gitattributes export-ignore
+.gitignore export-ignore
+.github export-ignore
+.vs export-ignore
+obj export-ignore
+bin/Debug export-ignore
+*.user export-ignore
+*.suo export-ignore
+
+# Language statistics (tell GitHub this is a C# project)
+*.cs linguist-language=C#
+*.jsx linguist-language=JavaScript
+

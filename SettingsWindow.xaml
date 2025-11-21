@@ -1,0 +1,657 @@
+<Window x:Class="Kuaijiejian.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="设置" 
+        Height="728" 
+        Width="450"
+        WindowStartupLocation="CenterScreen"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ResizeMode="NoResize">
+
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="50"
+                      GlassFrameThickness="0"
+                      ResizeBorderThickness="0"
+                      UseAeroCaptionButtons="False"/>
+    </WindowChrome.WindowChrome>
+
+    <Border x:Name="SettingsBorder"
+            CornerRadius="12" 
+            Background="White"
+            BorderThickness="1"
+            BorderBrush="#e5e7eb"
+            SizeChanged="SettingsBorder_SizeChanged">
+        <Border.Effect>
+            <DropShadowEffect ShadowDepth="0" 
+                              BlurRadius="20" 
+                              Opacity="0.3"
+                              Color="#000000"/>
+        </Border.Effect>
+
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <!-- 标题栏 -->
+            <Border Grid.Row="0" 
+                    Background="#f9fafb" 
+                    CornerRadius="12,12,0,0"
+                    Padding="20,15">
+                <Grid>
+                    <TextBlock Text="⚙️ 设置" 
+                               FontSize="18" 
+                               FontWeight="SemiBold"
+                               Foreground="#1f2937"
+                               WindowChrome.IsHitTestVisibleInChrome="False"/>
+                    <Button Content="✕" 
+                            HorizontalAlignment="Right"
+                            Width="30" Height="30"
+                            Background="Transparent"
+                            BorderThickness="0"
+                            FontSize="14"
+                            Foreground="#6b7280"
+                            Cursor="Hand"
+                            Click="CloseButton_Click"
+                            WindowChrome.IsHitTestVisibleInChrome="True">
+                        <Button.Style>
+                            <Style TargetType="Button">
+                                <Setter Property="Background" Value="Transparent"/>
+                                <Setter Property="Template">
+                                    <Setter.Value>
+                                        <ControlTemplate TargetType="Button">
+                                            <Border Background="{TemplateBinding Background}"
+                                                    CornerRadius="5">
+                                                <ContentPresenter HorizontalAlignment="Center"
+                                                                  VerticalAlignment="Center"/>
+                                            </Border>
+                                        </ControlTemplate>
+                                    </Setter.Value>
+                                </Setter>
+                                <Style.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter Property="Background" Value="#f3f4f6"/>
+                                    </Trigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                    </Button>
+                </Grid>
+            </Border>
+
+            <!-- 内容区域 - TabControl -->
+            <TabControl Grid.Row="1" 
+                        BorderThickness="0"
+                        Background="Transparent"
+                        Margin="0"
+                        SelectionChanged="TabControl_SelectionChanged">
+                <TabControl.Resources>
+                    <!-- TabItem Header 样式 -->
+                    <Style TargetType="TabItem">
+                        <Setter Property="Template">
+                            <Setter.Value>
+                                <ControlTemplate TargetType="TabItem">
+                                    <Border Name="Border" 
+                                            Background="Transparent" 
+                                            BorderThickness="0,0,0,2"
+                                            BorderBrush="Transparent"
+                                            Padding="20,12"
+                                            Margin="0,0,10,0">
+                                        <ContentPresenter x:Name="ContentSite"
+                                                          ContentSource="Header"
+                                                          VerticalAlignment="Center"
+                                                          HorizontalAlignment="Center"/>
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsSelected" Value="True">
+                                            <Setter TargetName="Border" Property="Background" Value="Transparent"/>
+                                            <Setter TargetName="Border" Property="BorderBrush" Value="#3b82f6"/>
+                                            <Setter Property="Foreground" Value="#3b82f6"/>
+                                        </Trigger>
+                                        <Trigger Property="IsSelected" Value="False">
+                                            <Setter Property="Foreground" Value="#6b7280"/>
+                                        </Trigger>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter TargetName="Border" Property="Background" Value="#f9fafb"/>
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </Setter.Value>
+                        </Setter>
+                        <Setter Property="FontSize" Value="14"/>
+                        <Setter Property="FontWeight" Value="SemiBold"/>
+                        <Setter Property="Cursor" Value="Hand"/>
+                    </Style>
+                </TabControl.Resources>
+
+                <!-- 主题设置标签页 -->
+                <TabItem Header="⚙️ 主题设置">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="20">
+                        <StackPanel>
+                            <!-- 按钮布局设置 -->
+                            <TextBlock Text="按钮布局" 
+                               FontSize="14" 
+                               FontWeight="SemiBold"
+                               Foreground="#374151"
+                               Margin="0,0,0,10"/>
+                    
+                    <Border Background="#fef3c7"
+                            CornerRadius="8"
+                            Padding="15"
+                            Margin="0,0,0,25">
+                        <StackPanel>
+                            <TextBlock Text="⚡ 每行按钮数量" 
+                                       FontSize="13"
+                                       FontWeight="SemiBold"
+                                       Margin="0,0,0,12"/>
+                            
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="120"/>
+                                </Grid.ColumnDefinitions>
+                                
+                                <!-- 滑块 -->
+                                <Slider x:Name="ButtonsPerRowSlider"
+                                        Grid.Column="0"
+                                        Minimum="1"
+                                        Maximum="100"
+                                        Value="5"
+                                        TickFrequency="1"
+                                        IsSnapToTickEnabled="True"
+                                        VerticalAlignment="Center"
+                                        Margin="0,0,15,0"
+                                        ValueChanged="ButtonsPerRowSlider_ValueChanged">
+                                    <Slider.Style>
+                                        <Style TargetType="Slider">
+                                            <Setter Property="Cursor" Value="Hand"/>
+                                        </Style>
+                                    </Slider.Style>
+                                </Slider>
+                                
+                                <!-- 数值输入框 -->
+                                <Border Grid.Column="1"
+                                        Background="#fbbf24"
+                                        CornerRadius="6"
+                                        Padding="4">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        
+                                        <TextBox x:Name="ButtonsPerRowInput"
+                                                 Grid.Column="0"
+                                                 Text="5"
+                                                 FontSize="14"
+                                                 FontWeight="Bold"
+                                                 Foreground="White"
+                                                 Background="Transparent"
+                                                 BorderThickness="0"
+                                                 HorizontalAlignment="Center"
+                                                 VerticalAlignment="Center"
+                                                 TextAlignment="Center"
+                                                 Width="50"
+                                                 PreviewTextInput="ButtonsPerRowInput_PreviewTextInput"
+                                                 TextChanged="ButtonsPerRowInput_TextChanged"
+                                                 GotFocus="ButtonsPerRowInput_GotFocus">
+                                            <TextBox.Style>
+                                                <Style TargetType="TextBox">
+                                                    <Setter Property="CaretBrush" Value="White"/>
+                                                </Style>
+                                            </TextBox.Style>
+                                        </TextBox>
+                                        
+                                        <TextBlock Grid.Column="1"
+                                                   Text="个/行"
+                                                   FontSize="12"
+                                                   Foreground="White"
+                                                   VerticalAlignment="Center"
+                                                   Margin="2,0,4,0"/>
+                                    </Grid>
+                                </Border>
+                            </Grid>
+                            
+                            <StackPanel Margin="0,12,0,0">
+                                <TextBlock FontSize="11" 
+                                           Foreground="#78350f"
+                                           TextWrapping="Wrap"
+                                           Margin="0,0,0,6">
+                                    <Run Text="调整每行显示的按钮数量。设置较小的数量会让按钮更大更容易点击。"/>
+                                </TextBlock>
+                                <TextBlock x:Name="SliderRangeHint"
+                                           FontSize="11" 
+                                           Foreground="#0369a1"
+                                           FontWeight="SemiBold"
+                                           TextWrapping="Wrap">
+                                    <Run Text="📏 智能范围：最小值由行数限制（最多40行）决定，最大值由屏幕宽度自动计算。"/>
+                                </TextBlock>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+                            
+                            <!-- 窗口跟随设置 -->
+                            <TextBlock Text="窗口跟随" 
+                               FontSize="14" 
+                               FontWeight="SemiBold"
+                               Foreground="#374151"
+                               Margin="0,0,0,10"/>
+                    
+                    <Border Background="#f0f9ff"
+                            CornerRadius="8"
+                            Padding="15"
+                            Margin="0,0,0,25">
+                        <StackPanel>
+                            <CheckBox x:Name="WindowFollowCheckBox"
+                                      Content="🪟 跟随Photoshop自动显示/隐藏"
+                                      FontSize="13"
+                                      Checked="WindowFollow_Changed"
+                                      Unchecked="WindowFollow_Changed"
+                                      Margin="0,0,0,8">
+                                <CheckBox.Style>
+                                    <Style TargetType="CheckBox">
+                                        <Setter Property="Cursor" Value="Hand"/>
+                                    </Style>
+                                </CheckBox.Style>
+                            </CheckBox>
+                            <TextBlock Text="启用后，使用Photoshop时程序自动显示，切换到其他程序时自动最小化" 
+                                       FontSize="11" 
+                                       Foreground="#0369a1"
+                                       Margin="22,0,0,0"
+                                       TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </Border>
+                    
+                    <TextBlock Text="配色主题" 
+                               FontSize="14" 
+                               FontWeight="SemiBold"
+                               Foreground="#374151"
+                               Margin="0,0,0,15"/>
+
+                    <!-- 主题列表 - 网格布局 -->
+                    <ItemsControl x:Name="ThemeList">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <WrapPanel Orientation="Horizontal"/>
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Button Click="ThemeButton_Click"
+                                        Tag="{Binding Name}"
+                                        Width="220"
+                                        Height="70"
+                                        Margin="0,0,10,10"
+                                        Padding="0"
+                                        Cursor="Hand"
+                                        ToolTip="{Binding Description}">
+                                    <Button.Style>
+                                        <Style TargetType="Button">
+                                            <Setter Property="Background" Value="White"/>
+                                            <Setter Property="BorderBrush" Value="#e5e7eb"/>
+                                            <Setter Property="BorderThickness" Value="1"/>
+                                            <Setter Property="Template">
+                                                <Setter.Value>
+                                                    <ControlTemplate TargetType="Button">
+                                                        <Border Background="{TemplateBinding Background}"
+                                                                BorderBrush="{TemplateBinding BorderBrush}"
+                                                                BorderThickness="{TemplateBinding BorderThickness}"
+                                                                CornerRadius="8"
+                                                                Padding="10"
+                                                                ClipToBounds="True">
+                                                            <ContentPresenter/>
+                                                        </Border>
+                                                    </ControlTemplate>
+                                                </Setter.Value>
+                                            </Setter>
+                                            <Style.Triggers>
+                                                <Trigger Property="IsMouseOver" Value="True">
+                                                    <Setter Property="Background" Value="#f9fafb"/>
+                                                    <Setter Property="BorderBrush" Value="#3b82f6"/>
+                                                </Trigger>
+                                                <Trigger Property="IsPressed" Value="True">
+                                                    <Setter Property="Background" Value="#eff6ff"/>
+                                                </Trigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Button.Style>
+
+                                    <Grid>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="*"/>
+                                        </Grid.RowDefinitions>
+
+                                        <!-- 主题名称 -->
+                                        <TextBlock Grid.Row="0"
+                                                   Text="{Binding Name}" 
+                                                   FontSize="13" 
+                                                   FontWeight="SemiBold"
+                                                   Foreground="#1f2937"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   Margin="0,0,0,6"/>
+
+                                        <!-- 颜色预览条 -->
+                                        <Grid Grid.Row="1">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="*"/>
+                                            </Grid.ColumnDefinitions>
+                                            
+                                            <Border Grid.Column="0" 
+                                                    Height="24"
+                                                    CornerRadius="4,0,0,4"
+                                                    Margin="0,0,1,0">
+                                                <Border.Background>
+                                                    <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                                        <GradientStop Color="{Binding LeftAreaStart}" Offset="0"/>
+                                                        <GradientStop Color="{Binding LeftAreaEnd}" Offset="1"/>
+                                                    </LinearGradientBrush>
+                                                </Border.Background>
+                                            </Border>
+                                            
+                                            <Border Grid.Column="1" 
+                                                    Height="24"
+                                                    CornerRadius="0,4,4,0"
+                                                    Margin="1,0,0,0">
+                                                <Border.Background>
+                                                    <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                                        <GradientStop Color="{Binding RightAreaStart}" Offset="0"/>
+                                                        <GradientStop Color="{Binding RightAreaEnd}" Offset="1"/>
+                                                    </LinearGradientBrush>
+                                                </Border.Background>
+                                            </Border>
+                                        </Grid>
+                                    </Grid>
+                                </Button>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                        </StackPanel>
+                    </ScrollViewer>
+                </TabItem>
+
+                <!-- 帮助说明标签页 -->
+                <TabItem Header="📖 帮助说明" Loaded="HelpTab_Loaded">
+                    <ScrollViewer x:Name="HelpScrollViewer" 
+                                  VerticalScrollBarVisibility="Auto" 
+                                  Padding="20">
+                        <StackPanel>
+                            <!-- 软件简介 -->
+                            <TextBlock Text="💡 软件简介" 
+                                       FontSize="16" 
+                                       FontWeight="Bold"
+                                       Foreground="#1f2937"
+                                       Margin="0,0,0,10"/>
+                            <Border Background="#eff6ff"
+                                    CornerRadius="8"
+                                    Padding="15"
+                                    Margin="0,0,0,25">
+                                <TextBlock TextWrapping="Wrap" 
+                                           FontSize="13" 
+                                           Foreground="#374151"
+                                           LineHeight="22">
+                                    <Run Text="Photoshop 快捷键管理工具是一款专为 Photoshop 设计的自动化工具，帮助你快速执行常用操作。"/><LineBreak/>
+                                    <Run Text=""/><LineBreak/>
+                                    <Run Text="✨ 主要特点："/><LineBreak/>
+                                    <Run Text="• 即点即执行，响应速度极快（25-85ms）"/><LineBreak/>
+                                    <Run Text="• 所有操作静默执行，无弹窗干扰"/><LineBreak/>
+                                    <Run Text="• 支持图层编辑、调整图层、动作管理等"/><LineBreak/>
+                                    <Run Text="• 可自定义功能按钮，支持拖拽排序"/><LineBreak/>
+                                </TextBlock>
+                            </Border>
+
+                            <!-- 快速开始 -->
+                            <TextBlock Text="🚀 快速开始" 
+                                       FontSize="16" 
+                                       FontWeight="Bold"
+                                       Foreground="#1f2937"
+                                       Margin="0,0,0,10"/>
+                            <Border Background="#f9fafb"
+                                    CornerRadius="8"
+                                    Padding="15"
+                                    Margin="0,0,0,25">
+                                <StackPanel>
+                                    <TextBlock FontSize="13" Foreground="#374151" LineHeight="22" TextWrapping="Wrap">
+                                        <Run Text="1️⃣ 添加功能：点击左侧【添加系统功能】或右侧【添加动作】按钮"/><LineBreak/>
+                                        <Run Text="2️⃣ 选择功能：在弹出窗口中勾选需要的功能，点击【添加选中功能】"/><LineBreak/>
+                                        <Run Text="3️⃣ 执行功能：点击功能按钮即可在 Photoshop 中执行"/><LineBreak/>
+                                        <Run Text="4️⃣ 管理功能：右键按钮可重命名，拖拽可排序，按 F2 可快速重命名"/><LineBreak/>
+                                    </TextBlock>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- 功能分类说明 -->
+                            <TextBlock Text="📚 功能分类" 
+                                       FontSize="16" 
+                                       FontWeight="Bold"
+                                       Foreground="#1f2937"
+                                       Margin="0,0,0,10"/>
+
+                            <!-- 文档保存 -->
+                            <Expander Header="💾 文档保存" 
+                                      IsExpanded="False"
+                                      Margin="0,0,0,10">
+                                <Expander.Style>
+                                    <Style TargetType="Expander">
+                                        <Setter Property="Background" Value="#f9fafb"/>
+                                        <Setter Property="BorderBrush" Value="#e5e7eb"/>
+                                        <Setter Property="BorderThickness" Value="1"/>
+                                        <Setter Property="Padding" Value="15"/>
+                                    </Style>
+                                </Expander.Style>
+                                <StackPanel Margin="10">
+                                    <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="#374151" Margin="0,0,0,8">
+                                        <Run FontWeight="SemiBold" Text="智能保存"/><Run Text="：已保存文档直接保存，未保存文档自动保存为 TIF（覆盖同名文件）"/>
+                                    </TextBlock>
+                                    <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="#374151">
+                                        <Run FontWeight="SemiBold" Text="安全保存"/><Run Text="：已保存文档直接保存，未保存文档保存为 TIF（自动添加 _1、_2 避免覆盖）"/>
+                                    </TextBlock>
+                                </StackPanel>
+                            </Expander>
+
+                            <!-- 历史记录 -->
+                            <Expander Header="↩️ 历史记录操作" 
+                                      IsExpanded="False"
+                                      Margin="0,0,0,10">
+                                <Expander.Style>
+                                    <Style TargetType="Expander">
+                                        <Setter Property="Background" Value="#f9fafb"/>
+                                        <Setter Property="BorderBrush" Value="#e5e7eb"/>
+                                        <Setter Property="BorderThickness" Value="1"/>
+                                        <Setter Property="Padding" Value="15"/>
+                                    </Style>
+                                </Expander.Style>
+                                <StackPanel Margin="10">
+                                    <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="#374151" Margin="0,0,0,8">
+                                        <Run FontWeight="SemiBold" Text="还原 (Ctrl+Z)"/><Run Text="：撤销/重做切换"/>
+                                    </TextBlock>
+                                    <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="#374151" Margin="0,0,0,8">
+                                        <Run FontWeight="SemiBold" Text="后退一步 (Alt+Ctrl+Z)"/><Run Text="：连续后退历史记录"/>
+                                    </TextBlock>
+                                    <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="#374151">
+                                        <Run FontWeight="SemiBold" Text="前进一步 (Shift+Ctrl+Z)"/><Run Text="：连续前进历史记录"/>
+                                    </TextBlock>
+                                </StackPanel>
+                            </Expander>
+
+                            <!-- 图层操作 -->
+                            <Expander Header="📝 图层基础操作" 
+                                      IsExpanded="False"
+                                      Margin="0,0,0,10">
+                                <Expander.Style>
+                                    <Style TargetType="Expander">
+                                        <Setter Property="Background" Value="#f9fafb"/>
+                                        <Setter Property="BorderBrush" Value="#e5e7eb"/>
+                                        <Setter Property="BorderThickness" Value="1"/>
+                                        <Setter Property="Padding" Value="15"/>
+                                    </Style>
+                                </Expander.Style>
+                                <StackPanel Margin="10">
+                                    <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="#374151" Margin="0,0,0,6">
+                                        <Run FontWeight="SemiBold" Text="新建图层"/><Run Text="：在当前图层上方创建新图层（无弹窗）"/>
+                                    </TextBlock>
+                                    <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="#374151" Margin="0,0,0,6">
+                                        <Run FontWeight="SemiBold" Text="复制图层"/><Run Text="：复制当前选中的图层（无弹窗）"/>
+                                    </TextBlock>
+                                    <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="#374151" Margin="0,0,0,6">
+                                        <Run FontWeight="SemiBold" Text="删除图层"/><Run Text="：删除当前选中的图层（静默执行）"/>
+                                    </TextBlock>
+                                    <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="#374151" Margin="0,0,0,6">
+                                        <Run FontWeight="SemiBold" Text="合并图层"/><Run Text="：合并当前图层与下一图层"/>
+                                    </TextBlock>
+                                    <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="#374151" Margin="0,0,0,6">
+                                        <Run FontWeight="SemiBold" Text="栅格化图层"/><Run Text="：将智能对象、文字等转为普通图层"/>
+                                    </TextBlock>
+                                    <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="#374151">
+                                        <Run FontWeight="SemiBold" Text="显示/隐藏图层"/><Run Text="：切换图层可见性"/>
+                                    </TextBlock>
+                                </StackPanel>
+                            </Expander>
+
+                            <!-- 调整图层 -->
+                            <Expander Header="🎨 调整图层" 
+                                      IsExpanded="False"
+                                      Margin="0,0,0,10">
+                                <Expander.Style>
+                                    <Style TargetType="Expander">
+                                        <Setter Property="Background" Value="#f9fafb"/>
+                                        <Setter Property="BorderBrush" Value="#e5e7eb"/>
+                                        <Setter Property="BorderThickness" Value="1"/>
+                                        <Setter Property="Padding" Value="15"/>
+                                    </Style>
+                                </Expander.Style>
+                                <StackPanel Margin="10">
+                                    <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="#374151" Margin="0,0,0,6">
+                                        <Run Text="支持所有常用调整图层：色相/饱和度、曲线、色阶、亮度/对比度、色彩平衡、黑白、渐变映射、照片滤镜等"/>
+                                    </TextBlock>
+                                    <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="#6b7280" FontStyle="Italic">
+                                        <Run Text="💡 提示：首次使用调整图层前，请先点击【打开属性面板】，之后创建调整图层时会自动显示参数面板"/>
+                                    </TextBlock>
+                                </StackPanel>
+                            </Expander>
+
+                            <!-- 工具切换 -->
+                            <Expander Header="🔧 工具切换" 
+                                      IsExpanded="False"
+                                      Margin="0,0,0,10">
+                                <Expander.Style>
+                                    <Style TargetType="Expander">
+                                        <Setter Property="Background" Value="#f9fafb"/>
+                                        <Setter Property="BorderBrush" Value="#e5e7eb"/>
+                                        <Setter Property="BorderThickness" Value="1"/>
+                                        <Setter Property="Padding" Value="15"/>
+                                    </Style>
+                                </Expander.Style>
+                                <StackPanel Margin="10">
+                                    <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="#374151" Margin="0,0,0,6">
+                                        <Run Text="快速切换到常用工具：裁剪工具、污点修复画笔、修补工具、混合画笔、渐变工具等"/>
+                                    </TextBlock>
+                                </StackPanel>
+                            </Expander>
+
+                            <!-- 常见问题 -->
+                            <TextBlock Text="❓ 常见问题" 
+                                       FontSize="16" 
+                                       FontWeight="Bold"
+                                       Foreground="#1f2937"
+                                       Margin="0,15,0,10"/>
+                            <Border Background="#fef3c7"
+                                    CornerRadius="8"
+                                    Padding="15"
+                                    Margin="0,0,0,25">
+                                <StackPanel>
+                                    <TextBlock FontSize="12" FontWeight="SemiBold" Foreground="#92400e" Margin="0,0,0,8">
+                                        Q: 点击功能按钮没有反应？
+                                    </TextBlock>
+                                    <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="#78350f" Margin="0,0,0,15">
+                                        A: 请确保 Photoshop 已经打开并运行。软件需要通过 COM 接口与 Photoshop 通信。
+                                    </TextBlock>
+                                    
+                                    <TextBlock FontSize="12" FontWeight="SemiBold" Foreground="#92400e" Margin="0,0,0,8">
+                                        Q: 调整图层创建后看不到参数面板？
+                                    </TextBlock>
+                                    <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="#78350f" Margin="0,0,0,15">
+                                        A: 首次使用前，请先点击"打开属性面板"功能，之后创建调整图层会自动显示面板。
+                                    </TextBlock>
+                                    
+                                    <TextBlock FontSize="12" FontWeight="SemiBold" Foreground="#92400e" Margin="0,0,0,8">
+                                        Q: 如何删除不需要的功能？
+                                    </TextBlock>
+                                    <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="#78350f">
+                                        A: 点击底部【批量删除图层功能】或【批量删除动作】按钮，勾选要删除的功能即可。
+                                    </TextBlock>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- 版本信息 -->
+                            <TextBlock Text="ℹ️ 版本信息" 
+                                       FontSize="16" 
+                                       FontWeight="Bold"
+                                       Foreground="#1f2937"
+                                       Margin="0,0,0,10"/>
+                            <Border Background="#f3f4f6"
+                                    CornerRadius="8"
+                                    Padding="15"
+                                    Margin="0,0,0,20">
+                                <TextBlock FontSize="12" Foreground="#374151">
+                                    <Run Text="版本：1.0.0"/><LineBreak/>
+                                    <Run Text="基于 .NET 8.0 + WPF 开发"/><LineBreak/>
+                                    <Run Text="使用 Adobe Photoshop COM API"/><LineBreak/>
+                                </TextBlock>
+                            </Border>
+                        </StackPanel>
+                    </ScrollViewer>
+                </TabItem>
+            </TabControl>
+
+            <!-- 底部按钮 -->
+            <Border Grid.Row="2" 
+                    Background="#f9fafb" 
+                    CornerRadius="0,0,12,12"
+                    Padding="20,15">
+                <StackPanel Orientation="Horizontal" 
+                            HorizontalAlignment="Right">
+                    <Button Content="关闭" 
+                            Width="100"
+                            Height="35"
+                            Background="#e5e7eb"
+                            Foreground="#374151"
+                            BorderThickness="0"
+                            FontSize="13"
+                            FontWeight="SemiBold"
+                            Cursor="Hand"
+                            Click="CloseButton_Click">
+                        <Button.Style>
+                            <Style TargetType="Button">
+                                <Setter Property="Background" Value="#e5e7eb"/>
+                                <Setter Property="Template">
+                                    <Setter.Value>
+                                        <ControlTemplate TargetType="Button">
+                                            <Border Background="{TemplateBinding Background}"
+                                                    CornerRadius="6"
+                                                    Padding="20,8">
+                                                <ContentPresenter HorizontalAlignment="Center"
+                                                                  VerticalAlignment="Center"/>
+                                            </Border>
+                                        </ControlTemplate>
+                                    </Setter.Value>
+                                </Setter>
+                                <Style.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter Property="Background" Value="#d1d5db"/>
+                                    </Trigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                    </Button>
+                </StackPanel>
+            </Border>
+        </Grid>
+    </Border>
+</Window>
+

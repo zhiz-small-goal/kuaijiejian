@@ -1,0 +1,43 @@
+[
+  {
+    "FunctionName": "新建图层",
+    "HotkeyString": "Ctrl+Shift+N",
+    "ScriptName": "CreateNewLayer.jsx",
+    "Color": "#4A90E2",
+    "ActionSetName": null,
+    "ActionName": null
+  },
+  {
+    "FunctionName": "保存文档",
+    "HotkeyString": "Ctrl+Shift+S",
+    "ScriptName": "SmartSave_Silent.jsx",
+    "Color": "#50C878",
+    "ActionSetName": null,
+    "ActionName": null
+  },
+  {
+    "FunctionName": "路径转形状",
+    "HotkeyString": "Ctrl+Shift+P",
+    "ScriptName": "PathToShape_Simple.jsx",
+    "Color": "#9B59B6",
+    "ActionSetName": null,
+    "ActionName": null
+  },
+  {
+    "FunctionName": "另存为JPG",
+    "HotkeyString": "Ctrl+Shift+J",
+    "ScriptName": "SaveAsJPG_Fixed.jsx",
+    "Color": "#F39C12",
+    "ActionSetName": null,
+    "ActionName": null
+  },
+  {
+    "FunctionName": "执行我的动作",
+    "HotkeyString": "Ctrl+Alt+A",
+    "ScriptName": null,
+    "Color": "#E74C3C",
+    "ActionSetName": "我的动作组",
+    "ActionName": "动作名称"
+  }
+]
+

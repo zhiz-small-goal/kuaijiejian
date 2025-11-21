@@ -1,0 +1,70 @@
+<Window x:Class="Kuaijiejian.ColorPickerWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:hc="https://handyorg.github.io/handycontrol"
+        Title="拾色器"
+        Width="320" Height="540"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        Background="#F5F5F5"
+        ShowInTaskbar="False">
+    <Grid Margin="15">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- 预览区 -->
+        <Border Grid.Row="0" Height="60" Margin="0,0,0,10" 
+                BorderBrush="#CCC" BorderThickness="1" CornerRadius="4">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <Border Grid.Column="0" Background="#F0F0F0">
+                    <TextBlock Text="原色" VerticalAlignment="Center" HorizontalAlignment="Center" 
+                               FontSize="12" Foreground="#666"/>
+                </Border>
+                <Border Grid.Column="1" x:Name="PreviewBorder" Background="White">
+                    <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                        <TextBlock Text="新色" FontSize="12" Foreground="#666" HorizontalAlignment="Center"/>
+                        <TextBlock x:Name="PreviewHexText" Text="#FFFFFF" FontSize="10" 
+                                   Foreground="#999" HorizontalAlignment="Center" Margin="0,2,0,0"/>
+                    </StackPanel>
+                </Border>
+            </Grid>
+        </Border>
+
+        <!-- HandyControl 专业颜色选择器 -->
+        <hc:ColorPicker Grid.Row="1" x:Name="MainColorPicker"
+                        SelectedColorChanged="ColorPicker_ColorChanged"
+                        Margin="0,0,0,10"/>
+
+        <!-- 快速预设 -->
+        <UniformGrid Grid.Row="2" Columns="8" Margin="0,0,0,10">
+            <Button Background="#FF0000" Click="PresetColor_Click" Margin="1" Height="20" BorderThickness="0" Cursor="Hand"/>
+            <Button Background="#FFFF00" Click="PresetColor_Click" Margin="1" Height="20" BorderThickness="0" Cursor="Hand"/>
+            <Button Background="#00FF00" Click="PresetColor_Click" Margin="1" Height="20" BorderThickness="0" Cursor="Hand"/>
+            <Button Background="#00FFFF" Click="PresetColor_Click" Margin="1" Height="20" BorderThickness="0" Cursor="Hand"/>
+            <Button Background="#0000FF" Click="PresetColor_Click" Margin="1" Height="20" BorderThickness="0" Cursor="Hand"/>
+            <Button Background="#FF00FF" Click="PresetColor_Click" Margin="1" Height="20" BorderThickness="0" Cursor="Hand"/>
+            <Button Background="#FFFFFF" Click="PresetColor_Click" Margin="1" Height="20" BorderThickness="1" BorderBrush="#CCC" Cursor="Hand"/>
+            <Button Background="#000000" Click="PresetColor_Click" Margin="1" Height="20" BorderThickness="0" Cursor="Hand"/>
+        </UniformGrid>
+
+        <!-- 屏幕取色器 -->
+        <Button Grid.Row="3" Content="🎨 屏幕取色器" Click="ScreenColorPicker_Click" 
+                Height="36" FontSize="13" Background="#E3F2FD" Cursor="Hand" Margin="0,0,0,10"
+                ToolTip="点击后在屏幕任意位置取色，ESC取消"/>
+
+        <!-- 操作按钮 -->
+        <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Content="确定" Width="80" Height="32" Margin="0,0,8,0" Click="OK_Click" Cursor="Hand"/>
+            <Button Content="取消" Width="80" Height="32" Click="Cancel_Click" Cursor="Hand"/>
+        </StackPanel>
+    </Grid>
+</Window>

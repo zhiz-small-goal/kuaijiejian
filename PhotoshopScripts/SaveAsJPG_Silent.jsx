@@ -1,0 +1,2 @@
+// 另存为JPG - 静默版本（已验证可用 ✅）
+try{var oldDM=app.displayDialogs;app.displayDialogs=DialogModes.NO;var d=app.activeDocument,n=d.name,b=n.replace(/\.[^\.]+$/,''),p;try{p=d.path;}catch(e){p=Folder.desktop;}var f,c=0;do{var fn=b+(c>0?'_'+c:'')+'.jpg';f=new File(p+'/'+fn);if(!f.exists)break;c++;}while(c<100);var o=new JPEGSaveOptions();o.quality=12;o.embedColorProfile=true;o.formatOptions=FormatOptions.STANDARDBASELINE;o.matte=MatteType.NONE;d.saveAs(f,o,true);app.displayDialogs=oldDM;}catch(e){app.displayDialogs=DialogModes.ALL;}

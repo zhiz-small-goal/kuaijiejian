@@ -1,0 +1,3 @@
+// 路径转羽化蒙版（静默版本）
+try{var d=app.activeDocument,r=new ActionReference();r.putProperty(charIDToTypeID('Path'),charIDToTypeID('WrPh'));var s=new ActionDescriptor();s.putReference(charIDToTypeID('null'),r);s.putUnitDouble(charIDToTypeID('Fthr'),charIDToTypeID('#Pxl'),0.5);s.putBoolean(charIDToTypeID('AntA'),true);executeAction(charIDToTypeID('setd'),s,DialogModes.NO);var m=new ActionDescriptor(),mr=new ActionReference();mr.putEnumerated(charIDToTypeID('Chnl'),charIDToTypeID('Chnl'),charIDToTypeID('Msk '));m.putReference(charIDToTypeID('At  '),mr);m.putEnumerated(charIDToTypeID('Usng'),charIDToTypeID('UsrM'),charIDToTypeID('RvlS'));executeAction(charIDToTypeID('Mk  '),m,DialogModes.NO);d.selection.deselect();}catch(e){}
+
