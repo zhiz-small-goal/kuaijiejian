@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Linq;
@@ -7,6 +7,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
+using System.Runtime.InteropServices;
 using WinForms = System.Windows.Forms; // 系统托盘，使用别名避免冲突
 
 namespace Kuaijiejian
@@ -45,6 +46,7 @@ namespace Kuaijiejian
         // 系统托盘图标
         private WinForms.NotifyIcon? _notifyIcon;
         private bool _hasShownTrayNotification = false;
+        private IntPtr _windowHandle = IntPtr.Zero;
 
         public MainWindow()
         {
@@ -96,6 +98,7 @@ namespace Kuaijiejian
             // 这样可以保持Photoshop的焦点，不打断工作流
             var helper = new System.Windows.Interop.WindowInteropHelper(this);
             WindowsApiHelper.SetWindowNoActivate(helper.Handle);
+            _windowHandle = helper.Handle;
             
             // 确保窗口激活并显示在前台（仅首次启动）
             this.Activate();
@@ -1403,65 +1406,75 @@ namespace Kuaijiejian
         }
 
         /// <summary>
-        /// 定时器Tick事件：检测Photoshop窗口状态并自动显示/隐藏（带防抖）
+        /// Alt/Win 切换过程中跳过检测，避免窗口抢焦点
+        /// </summary>
+        private bool IsTaskSwitchInProgress()
+        {
+            return Keyboard.IsKeyDown(Key.LeftAlt) || Keyboard.IsKeyDown(Key.RightAlt)
+                   || Keyboard.IsKeyDown(Key.LWin) || Keyboard.IsKeyDown(Key.RWin);
+        }
+
+        /// <summary>
+        /// 定时检测 Photoshop 前台状态并自动显示/最小化（不抢焦点）
         /// </summary>
         private void PhotoshopMonitorTimer_Tick(object? sender, EventArgs e)
         {
             try
             {
-                // 如果正在拖拽或拖动窗口，不要最小化窗口（避免操作被打断）
                 if (_isDragging || _isWindowDragging)
                     return;
 
-                // 获取当前前台窗口
+                if (IsTaskSwitchInProgress())
+                    return;
+
+                if (_windowHandle == IntPtr.Zero)
+                {
+                    _windowHandle = new System.Windows.Interop.WindowInteropHelper(this).Handle;
+                }
+
                 IntPtr foregroundWindow = WindowsApiHelper.GetForegroundWindow();
 
-                // 如果前台窗口属于当前进程（主窗口或任何子窗口/对话框），不要最小化
                 if (WindowsApiHelper.IsCurrentProcessWindow(foregroundWindow))
                     return;
 
-                // 检查是否是 Photoshop 窗口
                 bool isPhotoshopActive = WindowsApiHelper.IsPhotoshopWindow(foregroundWindow);
 
                 if (isPhotoshopActive)
                 {
-                    // 记录 Photoshop 最近一次处于前台的时间
                     _lastPhotoshopActiveTime = DateTime.Now;
 
-                    // Photoshop 处于激活状态：显示程序窗口
                     if (this.WindowState == WindowState.Minimized)
                     {
+                        WindowsApiHelper.ShowWindowNoActivate(_windowHandle);
                         this.WindowState = WindowState.Normal;
                         Debug.WriteLine("检测到 Photoshop 激活，自动显示窗口");
                     }
                 }
                 else
                 {
-                    // 前台不是 Photoshop：增加一个防抖时间，避免 Alt+Tab / 临时弹窗时频繁闪烁
                     if (_lastPhotoshopActiveTime != DateTime.MinValue &&
-                        (DateTime.Now - _lastPhotoshopActiveTime).TotalMilliseconds < 200)
+                        (DateTime.Now - _lastPhotoshopActiveTime).TotalMilliseconds < 300)
                     {
-                        // 刚刚才从 Photoshop 切出来，不立刻隐藏，等下一次 Tick 再看
                         return;
                     }
 
-                    // 其他程序处于激活状态：最小化到任务栏
                     if (this.WindowState != WindowState.Minimized)
                     {
+                        WindowsApiHelper.MinimizeWindowNoActivate(_windowHandle);
                         this.WindowState = WindowState.Minimized;
-                        Debug.WriteLine("检测到切换到其他程序，自动隐藏窗口");
+                        Debug.WriteLine("检测到切换到非 Photoshop，自动最小化窗口");
                     }
                 }
             }
             catch (Exception ex)
             {
-                // 静默失败，不影响程序运行
                 Debug.WriteLine($"窗口监控异常: {ex.Message}");
             }
         }
-
-
-        #endregion
+#endregion
     }
 }
+
+
+
 
