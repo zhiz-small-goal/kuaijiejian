@@ -37,3 +37,43 @@
 **后续 TODO：**  
 - [ ] 如仍有抢焦点场景，考虑在显示前检测前台线程输入状态进一步防抖  
 - [ ] 增加可配置的防抖时间与切换键监听开关
+
+### [002] 2025-12-06 按钮拖拽顺序持久化修复
+
+日期：2025-12-06  
+状态：已完成  
+
+**变更类型：**  
+- Bug 修复
+
+**涉及阶段：**  
+- 无
+
+**目标：**  
+- 重新启动后保留用户拖拽后的按钮顺序  
+- 兼容旧版 functions_config.json 文件结构  
+- 新增/删除功能后仍保持稳定排序
+
+**触发原因：**  
+- 用户拖动主窗口按钮后重启，顺序恢复为分组默认顺序
+
+**涉及文件：**  
+- `FunctionManager.cs`  
+- `functions_config.json`（运行后生成的配置）
+
+**改动概览：**  
+- `FunctionManager.cs` -> `RefreshAllFunctions()`: 按现有 AllFunctions 顺序对齐，新增项追加，避免拖拽顺序被重排  
+- `FunctionManager.cs` -> `SaveFunctions()/LoadFunctions()`: 新增 AllFunctions 序列化字段，优先按统一列表保存/加载，旧配置回退到 System/Application 列表  
+- `FunctionManager.cs` -> `ApplyOrderedFunctions()/BuildFunctionKey()`: 新增有序应用及唯一键生成，三套集合同步保持一致
+
+**关键点说明：**  
+- AllFunctions 作为顺序真源，保存时仍写入旧字段以兼容历史配置  
+- 去重依据 FunctionType + Category 及命令/动作标识，避免重复且保持顺序
+
+**测试验证：**  
+- [ ] 拖拽调整任意按钮顺序后重启，顺序保持不变  
+- [ ] 新增功能后重启，新增项保留在添加位置  
+- [ ] 旧版仅含 System/Application 字段的 functions_config.json 正常加载并支持顺序调整
+
+**后续 TODO：**  
+- [ ] 无

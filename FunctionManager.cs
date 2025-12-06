@@ -1,5 +1,6 @@
 using System;
 using System.Collections.ObjectModel;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
@@ -40,20 +41,42 @@ namespace Kuaijiejian
         }
 
         /// <summary>
-        /// 刷新统一列表 - 合并系统功能和应用功能
-        /// 按添加顺序排列（保持原有顺序）
+        /// 刷新统一列表
+        /// 保持已有顺序，追加新增项，移除已删除项
         /// </summary>
         public void RefreshAllFunctions()
         {
-            AllFunctions.Clear();
-            
-            // 按添加顺序合并两个列表
-            foreach (var item in SystemFunctions)
+            // 1) 组合最新的功能集合
+            var latestItems = SystemFunctions.Concat(ApplicationFunctions).ToList();
+
+            // 2) 按现有顺序对齐（避免拖拽顺序被打乱）
+            var ordered = new List<FunctionItem>();
+            var remaining = new Dictionary<string, FunctionItem>();
+
+            foreach (var item in latestItems)
             {
-                AllFunctions.Add(item);
+                var key = BuildFunctionKey(item);
+                if (!remaining.ContainsKey(key))
+                {
+                    remaining[key] = item;
+                }
             }
-            
-            foreach (var item in ApplicationFunctions)
+
+            foreach (var item in AllFunctions)
+            {
+                var key = BuildFunctionKey(item);
+                if (remaining.TryGetValue(key, out var matched))
+                {
+                    ordered.Add(matched);
+                    remaining.Remove(key);
+                }
+            }
+
+            // 3) 追加新增功能（用户新添加的功能按添加顺序在末尾）
+            ordered.AddRange(remaining.Values);
+
+            AllFunctions.Clear();
+            foreach (var item in ordered)
             {
                 AllFunctions.Add(item);
             }
@@ -163,10 +186,16 @@ namespace Kuaijiejian
         {
             try
             {
+                // 优先使用 AllFunctions 的顺序进行持久化，避免跨类别顺序丢失
+                var orderedFunctions = AllFunctions.Count > 0
+                    ? AllFunctions.ToList()
+                    : SystemFunctions.Concat(ApplicationFunctions).ToList();
+
                 var config = new FunctionConfig
                 {
-                    SystemFunctions = SystemFunctions.ToList(),
-                    ApplicationFunctions = ApplicationFunctions.ToList()
+                    AllFunctions = orderedFunctions,
+                    SystemFunctions = orderedFunctions.Where(f => f.Category == "System").ToList(),
+                    ApplicationFunctions = orderedFunctions.Where(f => f.Category == "Application").ToList()
                 };
 
                 var json = JsonSerializer.Serialize(config, new JsonSerializerOptions
@@ -197,41 +226,43 @@ namespace Kuaijiejian
 
                     if (config != null)
                     {
-                        SystemFunctions.Clear();
-                        ApplicationFunctions.Clear();
+                        // 读取 AllFunctions 以保留用户自定义顺序；若不存在则回退到旧结构
+                        var orderedFunctions = new List<FunctionItem>();
+                        var seenKeys = new HashSet<string>();
 
-                        // 去重加载：按功能内容（Command + FunctionType）作为唯一标识
-                        // 这样即使名字相同，只要脚本不同就是不同的功能
-                        var uniqueSystemFunctions = config.SystemFunctions
-                            .GroupBy(f => new { f.Command, f.FunctionType })
-                            .Select(g => g.First())
-                            .ToList();
-
-                        // 【关键修复】对 ApplicationFunctions 按类型分别去重
-                        var uniqueApplicationFunctions = config.ApplicationFunctions
-                            .GroupBy(f => new 
-                            { 
-                                f.FunctionType,
-                                // 动作功能用 ActionSetName + ActionName 去重
-                                // 其他功能用 Command 去重
-                                UniqueKey = f.FunctionType == "PhotoshopAction" 
-                                    ? $"{f.ActionSetName}|{f.ActionName}" 
-                                    : f.Command
-                            })
-                            .Select(g => g.First())
-                            .ToList();
-
-                        foreach (var item in uniqueSystemFunctions)
+                        if (config.AllFunctions != null && config.AllFunctions.Count > 0)
                         {
-                            SystemFunctions.Add(item);
+                            foreach (var item in config.AllFunctions)
+                            {
+                                var key = BuildFunctionKey(item);
+                                if (seenKeys.Add(key))
+                                {
+                                    orderedFunctions.Add(item);
+                                }
+                            }
+                        }
+                        else
+                        {
+                            foreach (var item in config.SystemFunctions ?? Enumerable.Empty<FunctionItem>())
+                            {
+                                var key = BuildFunctionKey(item);
+                                if (seenKeys.Add(key))
+                                {
+                                    orderedFunctions.Add(item);
+                                }
+                            }
+
+                            foreach (var item in config.ApplicationFunctions ?? Enumerable.Empty<FunctionItem>())
+                            {
+                                var key = BuildFunctionKey(item);
+                                if (seenKeys.Add(key))
+                                {
+                                    orderedFunctions.Add(item);
+                                }
+                            }
                         }
 
-                        foreach (var item in uniqueApplicationFunctions)
-                        {
-                            ApplicationFunctions.Add(item);
-                        }
-
-                        RefreshAllFunctions();
+                        ApplyOrderedFunctions(orderedFunctions);
                         return;
                     }
                 }
@@ -291,15 +322,57 @@ namespace Kuaijiejian
                 Category = "Application"
             });
 
+            RefreshAllFunctions();
             SaveFunctions();
+        }
+
+        /// <summary>
+        /// 将有序列表应用到三个集合，保持顺序一致
+        /// </summary>
+        private void ApplyOrderedFunctions(IEnumerable<FunctionItem> orderedFunctions)
+        {
+            SystemFunctions.Clear();
+            ApplicationFunctions.Clear();
+            AllFunctions.Clear();
+
+            foreach (var item in orderedFunctions)
+            {
+                AllFunctions.Add(item);
+
+                if (item.Category == "System")
+                {
+                    SystemFunctions.Add(item);
+                }
+                else
+                {
+                    ApplicationFunctions.Add(item);
+                }
+            }
+        }
+
+        /// <summary>
+        /// 生成用于判定唯一性的键，确保跨类别顺序一致性
+        /// </summary>
+        private static string BuildFunctionKey(FunctionItem item)
+        {
+            if (item == null) return string.Empty;
+
+            string type = item.FunctionType ?? string.Empty;
+            string category = item.Category ?? string.Empty;
+
+            if (type == "PhotoshopAction")
+            {
+                return $"{type}|{category}|{item.ActionSetName}|{item.ActionName}";
+            }
+
+            return $"{type}|{category}|{item.Command}|{item.Name}";
         }
 
         private class FunctionConfig
         {
-            public System.Collections.Generic.List<FunctionItem> SystemFunctions { get; set; } = new();
-            public System.Collections.Generic.List<FunctionItem> ApplicationFunctions { get; set; } = new();
+            public List<FunctionItem> AllFunctions { get; set; } = new();
+            public List<FunctionItem> SystemFunctions { get; set; } = new();
+            public List<FunctionItem> ApplicationFunctions { get; set; } = new();
         }
     }
 }
-
-
