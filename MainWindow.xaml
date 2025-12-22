@@ -13,7 +13,7 @@
         WindowStyle="None"
         AllowsTransparency="True"
         Background="Transparent"
-        ResizeMode="CanResize"
+        ResizeMode="NoResize"
         Visibility="Visible"
         Topmost="True"
         WindowState="Normal">
@@ -115,7 +115,7 @@
     <WindowChrome.WindowChrome>
         <WindowChrome CaptionHeight="0"
                       GlassFrameThickness="0"
-                      ResizeBorderThickness="5"
+                      ResizeBorderThickness="0"
                       UseAeroCaptionButtons="False"/>
     </WindowChrome.WindowChrome>
     
@@ -139,6 +139,9 @@
                 Padding="18,15,18,15"
                 Margin="0,0,0,0"
                 MouseLeftButtonDown="MainAreaBorder_MouseLeftButtonDown"
+                MouseMove="MainAreaBorder_MouseMove"
+                MouseLeftButtonUp="MainAreaBorder_MouseLeftButtonUp"
+                LostMouseCapture="MainAreaBorder_LostMouseCapture"
                 HorizontalAlignment="Stretch">
             <Border.Background>
                 <LinearGradientBrush x:Name="MainAreaGradient" StartPoint="0,0" EndPoint="0,1">
@@ -359,4 +362,3 @@
     </Grid>
     </Border>
 </Window>
-

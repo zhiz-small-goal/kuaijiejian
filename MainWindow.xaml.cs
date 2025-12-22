@@ -30,6 +30,10 @@ namespace Kuaijiejian
         
         // 窗口拖动状态标志（防止定时器在拖动时干扰）
         private bool _isWindowDragging = false;
+        private Point _windowDragStartScreen;
+        private double _windowDragStartLeft;
+        private double _windowDragStartTop;
+        private UIElement? _windowDragCaptureElement;
 
         // 最近一次检测到 Photoshop 处于前台的时间（用于防抖）
         private DateTime _lastPhotoshopActiveTime = DateTime.MinValue;
@@ -441,29 +445,70 @@ namespace Kuaijiejian
 
         /// <summary>
         /// 主区域鼠标按下事件 - 实现窗口拖动
-        /// 使用try-catch和标志位避免与定时器冲突
+        /// 使用手动拖动避免DragMove与NoActivate冲突
         /// </summary>
         private void MainAreaBorder_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
             if (e.ChangedButton == MouseButton.Left)
             {
-                try
+                if (sender is UIElement element)
                 {
-                    // 设置拖动标志，防止定时器在拖动时干扰
                     _isWindowDragging = true;
-                    this.DragMove();
-                }
-                catch (InvalidOperationException)
-                {
-                    // 捕获DragMove可能抛出的异常（如在双击时调用）
-                    // 静默处理，不影响用户体验
-                }
-                finally
-                {
-                    // 拖动结束后重置标志
-                    _isWindowDragging = false;
+                    _windowDragStartLeft = this.Left;
+                    _windowDragStartTop = this.Top;
+                    _windowDragStartScreen = PointToScreen(e.GetPosition(this));
+                    _windowDragCaptureElement = element;
+                    _windowDragCaptureElement.CaptureMouse();
+                    e.Handled = true;
                 }
             }
+        }
+
+        private void MainAreaBorder_MouseMove(object sender, MouseEventArgs e)
+        {
+            if (!_isWindowDragging || _windowDragCaptureElement == null)
+                return;
+
+            if (e.LeftButton != MouseButtonState.Pressed)
+            {
+                EndWindowDrag();
+                return;
+            }
+
+            Point currentScreen = PointToScreen(e.GetPosition(this));
+            double deltaX = currentScreen.X - _windowDragStartScreen.X;
+            double deltaY = currentScreen.Y - _windowDragStartScreen.Y;
+
+            this.Left = _windowDragStartLeft + deltaX;
+            this.Top = _windowDragStartTop + deltaY;
+        }
+
+        private void MainAreaBorder_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+        {
+            if (e.ChangedButton == MouseButton.Left)
+            {
+                EndWindowDrag();
+            }
+        }
+
+        private void MainAreaBorder_LostMouseCapture(object sender, MouseEventArgs e)
+        {
+            EndWindowDrag();
+        }
+
+        private void EndWindowDrag()
+        {
+            if (!_isWindowDragging)
+                return;
+
+            _isWindowDragging = false;
+
+            if (_windowDragCaptureElement != null && _windowDragCaptureElement.IsMouseCaptured)
+            {
+                _windowDragCaptureElement.ReleaseMouseCapture();
+            }
+
+            _windowDragCaptureElement = null;
         }
         
         #region 系统托盘功能
