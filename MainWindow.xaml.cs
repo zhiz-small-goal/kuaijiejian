@@ -16,6 +16,10 @@ namespace Kuaijiejian
     {
         private SettingsWindow? _settingsWindow;
         public FunctionManager _functionManager;
+
+        // UI 显示用：固定按钮（顶端） + 用户按钮（可拖拽排序）
+        private readonly ObservableCollection<FunctionItem> _displayFunctions = new();
+        private readonly ObservableCollection<FunctionItem> _pinnedFunctions = new();
         
         // 拖拽排序（WPF官方最佳实践）
         private Point _dragStartPoint;
@@ -70,7 +74,12 @@ namespace Kuaijiejian
             _functionManager = new FunctionManager();
             
             // 绑定数据 - 统一列表
-            AllFunctionsList.ItemsSource = _functionManager.AllFunctions;
+            InitializePinnedFunctions();
+            RefreshDisplayFunctions();
+            AllFunctionsList.ItemsSource = _displayFunctions;
+
+            // 当用户功能集合变化时，同步刷新显示集合（固定按钮 + 用户按钮）
+            _functionManager.AllFunctions.CollectionChanged += (s, e) => RefreshDisplayFunctions();
             
             // 窗口初始化代码
             this.Loaded += MainWindow_Loaded;
@@ -83,7 +92,65 @@ namespace Kuaijiejian
             this.Visibility = Visibility.Visible;
         }
 
-        private void MainWindow_Loaded(object sender, RoutedEventArgs e)
+        
+        /// <summary>
+        /// 初始化固定在顶端的内置按钮（不可拖拽/不可删除）
+        /// 这些按钮与普通功能按钮共享同一套 UI 模板，但行为走单独分支。
+        /// </summary>
+        private void InitializePinnedFunctions()
+        {
+            _pinnedFunctions.Clear();
+
+            _pinnedFunctions.Add(PinnedFunctionItem.Create(PinnedFunctionKind.BatchDelete, "多删"));
+            _pinnedFunctions.Add(PinnedFunctionItem.Create(PinnedFunctionKind.ClearAll, "全删"));
+            _pinnedFunctions.Add(PinnedFunctionItem.Create(PinnedFunctionKind.AddLayer, "图层"));
+            _pinnedFunctions.Add(PinnedFunctionItem.Create(PinnedFunctionKind.AddAction, "动作"));
+        }
+
+        /// <summary>
+        /// 刷新 UI 显示集合：固定按钮永远在前，用户按钮跟随其后
+        /// 注意：此集合仅用于显示，不参与 FunctionManager 的持久化顺序。
+        /// </summary>
+        private void RefreshDisplayFunctions()
+        {
+            _displayFunctions.Clear();
+
+            foreach (var pinned in _pinnedFunctions)
+            {
+                _displayFunctions.Add(pinned);
+            }
+
+            foreach (var item in _functionManager.AllFunctions)
+            {
+                _displayFunctions.Add(item);
+            }
+        }
+
+        /// <summary>
+        /// 执行固定按钮动作
+        /// </summary>
+        private void ExecutePinnedAction(PinnedFunctionItem pinned)
+        {
+            switch (pinned.Kind)
+            {
+                case PinnedFunctionKind.BatchDelete:
+                    BatchDeleteAllFunctions_Click(this, new RoutedEventArgs());
+                    break;
+                case PinnedFunctionKind.ClearAll:
+                    ClearAllFunctions_Click(this, new RoutedEventArgs());
+                    break;
+                case PinnedFunctionKind.AddLayer:
+                    AddSystemFunction_Click(this, new RoutedEventArgs());
+                    break;
+                case PinnedFunctionKind.AddAction:
+                    AddApplicationFunction_Click(this, new RoutedEventArgs());
+                    break;
+                default:
+                    break;
+            }
+        }
+
+private void MainWindow_Loaded(object sender, RoutedEventArgs e)
         {
             // 设置窗口位置到屏幕顶部居中
             SetWindowPositionToTopRight();
@@ -122,7 +189,7 @@ namespace Kuaijiejian
             // 当Photoshop激活时自动显示，切换到其他程序时自动最小化
             InitializePhotoshopMonitor();
             
-            UpdateFunctionCountInTitle();
+            RefreshDisplayFunctions();
             UpdateStatus($"程序已启动，共{_functionManager.AllFunctions.Count}个功能");
         }
 
@@ -226,8 +293,6 @@ namespace Kuaijiejian
                 // 主区域（标题栏已移除）
                 MainAreaStart.Color = (Color)ColorConverter.ConvertFromString(theme.LeftAreaStart);
                 MainAreaEnd.Color = (Color)ColorConverter.ConvertFromString(theme.RightAreaEnd);
-                MainSectionTitle.Foreground = (Brush)converter.ConvertFromString(theme.SectionTitleColor)!;
-                
                 // === 应用按钮主题颜色到动态资源 ===
                 
                 // 功能按钮颜色
@@ -277,21 +342,8 @@ namespace Kuaijiejian
             }
             
             // 更新标题显示的功能数量
-            UpdateFunctionCountInTitle();
+            RefreshDisplayFunctions();
         }
-
-        /// <summary>
-        /// 更新标题中的功能数量
-        /// </summary>
-        private void UpdateFunctionCountInTitle()
-        {
-            int totalCount = _functionManager.AllFunctions.Count;
-            int systemCount = _functionManager.SystemFunctions.Count;
-            int actionCount = _functionManager.ApplicationFunctions.Count;
-            
-            MainSectionTitle.Text = $"功能 ({totalCount})";
-        }
-
         /// <summary>
         /// 应用按钮布局配置（每行按钮数量）
         /// </summary>
@@ -814,14 +866,22 @@ namespace Kuaijiejian
         {
             if (sender is Button button && button.Tag is FunctionItem function)
             {
+                // 固定按钮：不参与选择/重命名/拖拽，仅执行内置动作
+                if (function is PinnedFunctionItem pinned)
+                {
+                    ExecutePinnedAction(pinned);
+                    return;
+                }
+
                 // 记录选中的按钮（用于F2重命名）
                 _selectedButton = button;
                 _selectedFunction = function;
-                
+
                 // 直接执行功能，无延迟
                 ExecuteFunction(function);
             }
         }
+
 
         /// <summary>
         /// 执行功能
@@ -969,6 +1029,13 @@ namespace Kuaijiejian
         {
             if (sender is Button button && button.Tag is FunctionItem function)
             {
+                if (function is PinnedFunctionItem)
+                {
+                    // 固定按钮不提供右键菜单（不可删除/不可改名/不可改色）
+                    e.Handled = true;
+                    return;
+                }
+
                 // 记录选中的按钮
                 _selectedButton = button;
                 _selectedFunction = function;
@@ -1107,7 +1174,7 @@ namespace Kuaijiejian
 
                 if (addedCount > 0)
                 {
-                    UpdateFunctionCountInTitle();
+                    RefreshDisplayFunctions();
                     UpdateStatus($"已添加 {addedCount} 个图层编辑功能");
                 }
             };
@@ -1168,7 +1235,7 @@ namespace Kuaijiejian
 
                 if (addedCount > 0)
                 {
-                    UpdateFunctionCountInTitle();
+                    RefreshDisplayFunctions();
                     UpdateStatus($"已添加 {addedCount} 个 Photoshop 动作");
                 }
             };
@@ -1252,7 +1319,7 @@ namespace Kuaijiejian
                     _functionManager.RemoveFunction(function);
                 }
 
-                UpdateFunctionCountInTitle();
+                RefreshDisplayFunctions();
                 UpdateStatus($"已删除 {selectedFunctions.Count} 个功能");
             }
         }
@@ -1271,7 +1338,7 @@ namespace Kuaijiejian
             int count = _functionManager.AllFunctions.Count;
             _functionManager.ClearAllFunctions();
 
-            UpdateFunctionCountInTitle();
+            RefreshDisplayFunctions();
             UpdateStatus($"已清空{count}个功能");
         }
 
@@ -1281,6 +1348,12 @@ namespace Kuaijiejian
 
         private void FunctionButton_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
+            if (sender is Button b && b.Tag is PinnedFunctionItem)
+            {
+                // 固定按钮不可拖拽
+                return;
+            }
+
             _dragStartPoint = e.GetPosition(null);
             _isDragging = false;
         }
@@ -1299,6 +1372,12 @@ namespace Kuaijiejian
                 _isDragging = true;
 
                 var button = sender as Button;
+                if (button?.Tag is PinnedFunctionItem)
+                {
+                    // 固定按钮不可拖拽
+                    return;
+                }
+
                 if (button?.Tag is FunctionItem draggedItem)
                 {
                     DragDrop.DoDragDrop(button, draggedItem, DragDropEffects.Move);
@@ -1310,43 +1389,63 @@ namespace Kuaijiejian
 
         private void FunctionButton_DragOver(object sender, DragEventArgs e)
         {
-            if (e.Data.GetDataPresent(typeof(FunctionItem)))
+            if (!e.Data.GetDataPresent(typeof(FunctionItem)))
             {
-                e.Effects = DragDropEffects.Move;
+                e.Effects = DragDropEffects.None;
+                e.Handled = true;
+                return;
             }
-            else
+
+            var dragged = e.Data.GetData(typeof(FunctionItem)) as FunctionItem;
+            var target = (sender as Button)?.Tag as FunctionItem;
+
+            // 固定按钮不参与拖拽交换；也不允许拖拽项落到固定按钮上
+            if (dragged is PinnedFunctionItem || target is PinnedFunctionItem)
             {
                 e.Effects = DragDropEffects.None;
             }
+            else
+            {
+                e.Effects = DragDropEffects.Move;
+            }
+
             e.Handled = true;
         }
 
         private void FunctionButton_Drop(object sender, DragEventArgs e)
         {
-            if (e.Data.GetDataPresent(typeof(FunctionItem)))
+            if (!e.Data.GetDataPresent(typeof(FunctionItem)))
             {
-                var droppedItem = e.Data.GetData(typeof(FunctionItem)) as FunctionItem;
-                var targetButton = sender as Button;
-                var targetItem = targetButton?.Tag as FunctionItem;
+                return;
+            }
 
-                if (droppedItem != null && targetItem != null && droppedItem != targetItem)
-                {
-                    // 在 AllFunctions 中交换位置
-                    int oldIndex = _functionManager.AllFunctions.IndexOf(droppedItem);
-                    int newIndex = _functionManager.AllFunctions.IndexOf(targetItem);
+            var droppedItem = e.Data.GetData(typeof(FunctionItem)) as FunctionItem;
+            var targetButton = sender as Button;
+            var targetItem = targetButton?.Tag as FunctionItem;
 
-                    if (oldIndex >= 0 && newIndex >= 0)
-                    {
-                        // 真正的交换：A和B直接对调位置
-                        // 使用C# 7.0的元组语法进行交换
-                        (_functionManager.AllFunctions[oldIndex], _functionManager.AllFunctions[newIndex]) = 
-                            (_functionManager.AllFunctions[newIndex], _functionManager.AllFunctions[oldIndex]);
-                        
-                        // 同步更新到原始列表
-                        UpdateOriginalCollectionsOrder();
-                        _functionManager.SaveFunctions();
-                    }
-                }
+            if (droppedItem == null || targetItem == null || droppedItem == targetItem)
+            {
+                return;
+            }
+
+            // 固定按钮不参与拖拽交换；也不允许拖拽项落到固定按钮上
+            if (droppedItem is PinnedFunctionItem || targetItem is PinnedFunctionItem)
+            {
+                return;
+            }
+
+            // 在 AllFunctions 中交换位置（仅用户功能参与持久化）
+            int oldIndex = _functionManager.AllFunctions.IndexOf(droppedItem);
+            int newIndex = _functionManager.AllFunctions.IndexOf(targetItem);
+
+            if (oldIndex >= 0 && newIndex >= 0)
+            {
+                (_functionManager.AllFunctions[oldIndex], _functionManager.AllFunctions[newIndex]) =
+                    (_functionManager.AllFunctions[newIndex], _functionManager.AllFunctions[oldIndex]);
+
+                UpdateOriginalCollectionsOrder();
+                _functionManager.SaveFunctions();
+                RefreshDisplayFunctions();
             }
         }
 
