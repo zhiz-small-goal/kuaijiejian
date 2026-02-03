@@ -101,10 +101,10 @@ namespace Kuaijiejian
         {
             _pinnedFunctions.Clear();
 
-            _pinnedFunctions.Add(PinnedFunctionItem.Create(PinnedFunctionKind.BatchDelete, "多删"));
-            _pinnedFunctions.Add(PinnedFunctionItem.Create(PinnedFunctionKind.ClearAll, "全删"));
-            _pinnedFunctions.Add(PinnedFunctionItem.Create(PinnedFunctionKind.AddLayer, "图层"));
-            _pinnedFunctions.Add(PinnedFunctionItem.Create(PinnedFunctionKind.AddAction, "动作"));
+            _pinnedFunctions.Add(PinnedFunctionItem.Create(PinnedFunctionKind.BatchDelete, "批量删除"));
+            _pinnedFunctions.Add(PinnedFunctionItem.Create(PinnedFunctionKind.ClearAll, "清空全部"));
+            _pinnedFunctions.Add(PinnedFunctionItem.Create(PinnedFunctionKind.AddLayer, "添加图层"));
+            _pinnedFunctions.Add(PinnedFunctionItem.Create(PinnedFunctionKind.AddAction, "选择动作"));
         }
 
         /// <summary>
@@ -171,14 +171,44 @@ private void MainWindow_Loaded(object sender, RoutedEventArgs e)
             WindowsApiHelper.SetWindowNoActivate(helper.Handle);
             _windowHandle = helper.Handle;
             
-            // 确保窗口激活并显示在前台（仅首次启动）
-            this.Activate();
+            // 【窗口跟随】启用时不主动抢占焦点；并根据当前前台窗口设置初始显示状态
+            if (DisplayModeManager.EnableWindowFollow)
+            {
+                try
+                {
+                    IntPtr fg = WindowsApiHelper.GetForegroundWindow();
+                    bool psActive = WindowsApiHelper.IsPhotoshopWindow(fg);
+
+                    if (psActive)
+                    {
+                        WindowsApiHelper.ShowWindowNoActivate(_windowHandle);
+                        this.WindowState = WindowState.Normal;
+                    }
+                    else
+                    {
+                        WindowsApiHelper.MinimizeWindowNoActivate(_windowHandle);
+                        this.WindowState = WindowState.Minimized;
+                    }
+
+                    // 尝试将焦点交还给 Photoshop（若存在）
+                    WindowsApiHelper.ActivatePhotoshopWindow();
+                }
+                catch
+                {
+                    // 忽略：窗口跟随不应阻断主流程
+                }
+            }
+            else
+            {
+                // 窗口跟随关闭时：保持原行为（显示并激活窗口）
+                this.Activate();
+                this.Focus();
+            }
+
             
             // 性能优化：后台预热Photoshop COM连接
             // 确保用户第一次点击按钮时立即响应，无延迟
             System.Threading.Tasks.Task.Run(() => PhotoshopHelper.WarmUpConnection());
-            this.Focus();
-            
             // 初始化圆角裁剪
             UpdateWindowClip();
             
