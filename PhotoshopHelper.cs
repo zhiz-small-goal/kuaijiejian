@@ -3,178 +3,504 @@ using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Diagnostics;
 using System.Linq;
+using System.Threading;
+using Microsoft.Win32;
 
 namespace Kuaijiejian
 {
     /// <summary>
     /// Photoshop COM 自动化帮助类
-    /// 基于 Adobe Photoshop Scripting Guide 官方文档
-    /// 参考：https://www.adobe.com/devnet/photoshop/scripting.html
+    /// - 通过 COM ProgID（版本无关 / 版本相关）创建 Photoshop.Application
+    /// - 支持多版本并存时优先绑定“正在运行的 Photoshop”版本
+    /// 
+    /// 说明：
+    /// 1) Windows 下 Photoshop 支持通过 COM 自动化进行脚本控制（DoJavaScript 等）。
+    /// 2) COM 的“版本无关 ProgID”可能通过 CurVer 指向“最新安装版本”，导致旧版本（例如 2021）已启动但无法被控制。
     /// </summary>
     public static class PhotoshopHelper
     {
-        private const string PHOTOSHOP_PROGID = "Photoshop.Application";
+        private const string PHOTOSHOP_BASE_PROGID = "Photoshop.Application";
+
+        private static readonly object _comLock = new();
+        private static dynamic? _cachedPsApp = null;
+        private static string? _cachedProgId = null;
+        private static Type? _cachedComType = null;
 
         /// <summary>
-        /// 检查 Photoshop 是否已安装
-        /// 通过检查 COM ProgID 注册表项
+        /// 最近一次 COM 失败信息（用于诊断；不保证线程安全的强一致性）
         /// </summary>
-        public static bool IsPhotoshopInstalled()
+        public static string? LastError { get; private set; }
+
+        #region ProgID/COM 解析（兼容多版本并存）
+
+        /// <summary>
+        /// 尝试获取正在运行的 Photoshop 进程对应的产品版本（主/次版本即可）。
+        /// 若无运行实例或权限不足，返回 null。
+        /// </summary>
+        private static Version? TryGetRunningPhotoshopVersion()
         {
             try
             {
-                Type? type = Type.GetTypeFromProgID(PHOTOSHOP_PROGID);
-                return type != null;
+                // Photoshop 进程名通常为 "Photoshop"
+                var processes = Process.GetProcessesByName("Photoshop");
+                if (processes == null || processes.Length == 0)
+                    return null;
+
+                // 优先选择有主窗口的实例
+                var ordered = processes
+                    .OrderByDescending(p => p.MainWindowHandle != IntPtr.Zero)
+                    .ToList();
+
+                foreach (var p in ordered)
+                {
+                    try
+                    {
+                        var vi = p.MainModule?.FileVersionInfo;
+                        if (vi == null)
+                            continue;
+
+                        // ProductMajorPart/MinorPart 更接近“产品版本”语义（例如 22.x）
+                        int maj = vi.ProductMajorPart;
+                        int min = vi.ProductMinorPart;
+
+                        if (maj > 0)
+                            return new Version(maj, Math.Max(0, min));
+                    }
+                    catch
+                    {
+                        // 进程模块信息读取可能因为权限/沙箱失败，继续尝试其他实例
+                    }
+                }
+
+                return null;
             }
             catch
             {
-                return false;
+                return null;
             }
         }
 
-
         /// <summary>
-        /// 获取 Photoshop 应用程序实例
-        /// 使用 COM Interop - .NET 官方方法
+        /// 读取 HKCR\Photoshop.Application\CurVer 的默认值（若存在）
+        /// CurVer 是 COM 的“版本无关 ProgID -> 当前版本 ProgID”指针。
         /// </summary>
-        private static dynamic GetPhotoshopApplication()
+        private static string? TryReadCurVerProgId()
         {
             try
             {
-                Type? type = Type.GetTypeFromProgID(PHOTOSHOP_PROGID);
-                if (type == null)
+                // 先读 64-bit 视图（Photoshop 现代版本通常为 64-bit）
+                string? cur = TryReadCurVerProgId(RegistryView.Registry64);
+                if (!string.IsNullOrWhiteSpace(cur))
+                    return cur;
+
+                // 再读 32-bit 视图作为兜底
+                return TryReadCurVerProgId(RegistryView.Registry32);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static string? TryReadCurVerProgId(RegistryView view)
+        {
+            try
+            {
+                using var baseKey = RegistryKey.OpenBaseKey(RegistryHive.ClassesRoot, view);
+                using var curVerKey = baseKey.OpenSubKey($"{PHOTOSHOP_BASE_PROGID}\\CurVer");
+                if (curVerKey == null)
+                    return null;
+
+                // (default) 值
+                var value = curVerKey.GetValue(null) as string;
+                return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// 基于运行中的 Photoshop 版本构造若干“可能存在”的版本相关 ProgID。
+        /// 经验上 Adobe 会注册形如 Photoshop.Application.150 / .220 等版本号（例如 15.0 -> 150）。
+        /// 此处不把该映射当作事实：以“存在的注册项”为准。
+        /// </summary>
+        private static IEnumerable<string> BuildProgIdCandidatesForVersion(Version v)
+        {
+            var candidates = new List<string>();
+
+            // 形态 1：Photoshop.Application.{major}
+            candidates.Add($"{PHOTOSHOP_BASE_PROGID}.{v.Major}");
+
+            // 形态 2：Photoshop.Application.{major*10+minor}（例如 22.0 -> 220）
+            try
+            {
+                int v10 = checked(v.Major * 10 + v.Minor);
+                candidates.Add($"{PHOTOSHOP_BASE_PROGID}.{v10}");
+            }
+            catch
+            {
+                // ignore overflow (very unlikely)
+            }
+
+            // 形态 3：Photoshop.Application.{major*10}（当 minor != 0 时给一个近似）
+            try
+            {
+                int v10Major = checked(v.Major * 10);
+                candidates.Add($"{PHOTOSHOP_BASE_PROGID}.{v10Major}");
+            }
+            catch
+            {
+            }
+
+            // 形态 4：Photoshop.Application.{major}.{minor}（少数 COM 组件会这样）
+            candidates.Add($"{PHOTOSHOP_BASE_PROGID}.{v.Major}.{v.Minor}");
+
+            // 去重
+            return candidates
+                .Where(s => !string.IsNullOrWhiteSpace(s))
+                .Distinct(StringComparer.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// 尝试解析一个可用的 Photoshop COM Type 与对应 ProgID。
+        /// preferRunningVersion=true：优先匹配“正在运行的 Photoshop 版本”，用于多版本并存。
+        /// preferRunningVersion=false：用于“是否安装”检测（尽量返回任一可用 ProgID）。
+        /// </summary>
+        private static bool TryResolvePhotoshopComType(
+            bool preferRunningVersion,
+            out Type? comType,
+            out string? progId)
+        {
+            comType = null;
+            progId = null;
+
+            // 1) 如果要求优先运行版本，则先用进程版本推导候选 ProgID
+            if (preferRunningVersion)
+            {
+                var runningVer = TryGetRunningPhotoshopVersion();
+                if (runningVer != null)
                 {
-                    throw new Exception("未找到 Photoshop COM 接口");
+                    foreach (var candidate in BuildProgIdCandidatesForVersion(runningVer))
+                    {
+                        var t = Type.GetTypeFromProgID(candidate, throwOnError: false);
+                        if (t != null)
+                        {
+                            comType = t;
+                            progId = candidate;
+                            return true;
+                        }
+                    }
+                }
+            }
+
+            // 2) 版本无关 ProgID（可能存在，也可能因安装/卸载/权限导致缺失）
+            {
+                var t = Type.GetTypeFromProgID(PHOTOSHOP_BASE_PROGID, throwOnError: false);
+                if (t != null)
+                {
+                    comType = t;
+                    progId = PHOTOSHOP_BASE_PROGID;
+                    return true;
+                }
+            }
+
+            // 3) CurVer 指向的当前版本 ProgID（Windows COM 侧的标准机制）
+            {
+                var cur = TryReadCurVerProgId();
+                if (!string.IsNullOrWhiteSpace(cur))
+                {
+                    var t = Type.GetTypeFromProgID(cur, throwOnError: false);
+                    if (t != null)
+                    {
+                        comType = t;
+                        progId = cur;
+                        return true;
+                    }
+                }
+            }
+
+            // 4) 兜底：枚举注册表中所有 Photoshop.Application.*（仅在前面都失败时触发）
+            //    这一步开销相对更高，因此放到最后。
+            foreach (var view in new[] { RegistryView.Registry64, RegistryView.Registry32 })
+            {
+                try
+                {
+                    using var baseKey = RegistryKey.OpenBaseKey(RegistryHive.ClassesRoot, view);
+                    foreach (var name in baseKey.GetSubKeyNames())
+                    {
+                        if (!name.StartsWith($"{PHOTOSHOP_BASE_PROGID}.", StringComparison.OrdinalIgnoreCase))
+                            continue;
+
+                        var t = Type.GetTypeFromProgID(name, throwOnError: false);
+                        if (t != null)
+                        {
+                            comType = t;
+                            progId = name;
+                            return true;
+                        }
+                    }
+                }
+                catch
+                {
+                    // ignore
+                }
+            }
+
+            return false;
+        }
+
+        #endregion
+
+        /// <summary>
+        /// 检查 Photoshop 是否已安装（至少存在一个可用的 COM ProgID）
+        /// </summary>
+        public static bool IsPhotoshopInstalled()
+        {
+            return TryResolvePhotoshopComType(
+                preferRunningVersion: false,
+                out _,
+                out _);
+        }
+
+        /// <summary>
+        /// 获取 Photoshop 应用程序对象（不缓存，每次新建/连接）
+        /// </summary>
+        public static dynamic? GetPhotoshopApplication()
+        {
+            try
+            {
+                if (!TryResolvePhotoshopComType(
+                        preferRunningVersion: true,
+                        out var comType,
+                        out var progId)
+                    || comType == null
+                    || string.IsNullOrWhiteSpace(progId))
+                {
+                    LastError = "无法解析 Photoshop COM ProgID（注册表无对应项或权限不足）。";
+                    return null;
                 }
 
-                // 创建或连接到现有实例
-                dynamic app = Activator.CreateInstance(type);
+                // 创建 COM 实例；当目标版本已运行时，多数情况下会回到该实例（取决于 COM 服务器实现）
+                var app = Activator.CreateInstance(comType);
+                LastError = null;
                 return app;
             }
             catch (Exception ex)
             {
-                throw new Exception($"无法连接到 Photoshop：{ex.Message}", ex);
+                LastError = $"创建 Photoshop COM 实例失败：{ex.Message}";
+                return null;
             }
         }
 
         /// <summary>
-        /// 执行 ExtendScript 脚本代码
-        /// Adobe 官方方法：Application.DoJavaScript()
-        /// 焦点优化：执行完后自动返回Photoshop，不打断工作流
+        /// 获取缓存的 Photoshop 应用程序对象（会随“当前运行版本”动态切换）
+        /// </summary>
+        private static dynamic? GetCachedPhotoshopApplication()
+        {
+            lock (_comLock)
+            {
+                try
+                {
+                    if (!TryResolvePhotoshopComType(
+                            preferRunningVersion: true,
+                            out var comType,
+                            out var progId)
+                        || comType == null
+                        || string.IsNullOrWhiteSpace(progId))
+                    {
+                        LastError = "无法解析 Photoshop COM ProgID（注册表无对应项或权限不足）。";
+                        InvalidateCache_NoLock();
+                        return null;
+                    }
+
+                    bool needRecreate =
+                        _cachedPsApp == null ||
+                        _cachedComType == null ||
+                        _cachedProgId == null ||
+                        !string.Equals(_cachedProgId, progId, StringComparison.OrdinalIgnoreCase);
+
+                    if (!needRecreate)
+                        return _cachedPsApp;
+
+                    // 释放旧对象
+                    InvalidateCache_NoLock();
+
+                    // 创建新对象并缓存
+                    _cachedPsApp = Activator.CreateInstance(comType);
+                    _cachedComType = comType;
+                    _cachedProgId = progId;
+
+                    LastError = null;
+                    return _cachedPsApp;
+                }
+                catch (Exception ex)
+                {
+                    LastError = $"获取缓存 Photoshop COM 实例失败：{ex.Message}";
+                    InvalidateCache_NoLock();
+                    return null;
+                }
+            }
+        }
+
+        /// <summary>
+        /// 释放缓存的 COM 对象
+        /// </summary>
+        private static void InvalidateCache()
+        {
+            lock (_comLock)
+            {
+                InvalidateCache_NoLock();
+            }
+        }
+
+        private static void InvalidateCache_NoLock()
+        {
+            try
+            {
+                if (_cachedPsApp != null && Marshal.IsComObject(_cachedPsApp))
+                {
+                    try { Marshal.FinalReleaseComObject(_cachedPsApp); } catch { }
+                }
+            }
+            catch
+            {
+                // ignore
+            }
+            finally
+            {
+                _cachedPsApp = null;
+                _cachedProgId = null;
+                _cachedComType = null;
+            }
+        }
+
+        /// <summary>
+        /// 执行 Photoshop 脚本（带弹窗/错误抛出）
         /// </summary>
         public static string ExecuteScript(string scriptCode)
         {
+            if (string.IsNullOrWhiteSpace(scriptCode))
+                return string.Empty;
+
             dynamic? app = null;
             try
             {
                 app = GetPhotoshopApplication();
-                
-                // 使用 Adobe 官方 DoJavaScript 方法
-                object result = app.DoJavaScript(scriptCode);
-                
-                // 【焦点优化】执行完脚本后，自动将焦点返回到Photoshop
-                System.Threading.Tasks.Task.Run(() => 
-                {
-                    System.Threading.Thread.Sleep(50);
-                    WindowsApiHelper.ActivatePhotoshopWindow();
-                });
-                
-                return result?.ToString() ?? string.Empty;
-            }
-            catch (COMException comEx)
-            {
-                // 即使失败也尝试返回焦点
-                System.Threading.Tasks.Task.Run(() => 
-                {
-                    System.Threading.Thread.Sleep(50);
-                    WindowsApiHelper.ActivatePhotoshopWindow();
-                });
-                
-                // COM 错误处理
-                throw new Exception($"执行脚本失败: {comEx.Message}", comEx);
+                if (app == null)
+                    throw new Exception(LastError ?? "无法获取 Photoshop COM 对象。");
+
+                string result = app.DoJavaScript(scriptCode);
+                LastError = null;
+                return result ?? string.Empty;
             }
             finally
             {
-                // 释放 COM 对象
-                if (app != null)
+                if (app != null && Marshal.IsComObject(app))
                 {
-                    Marshal.ReleaseComObject(app);
+                    try { Marshal.FinalReleaseComObject(app); } catch { }
                 }
             }
         }
 
-        // 缓存Photoshop COM对象以提高性能
-        // Adobe官方最佳实践：重用COM对象而不是每次创建
-        private static dynamic? _cachedPsApp = null;
-        private static readonly object _lockObject = new object();
-
         /// <summary>
-        /// 获取缓存的Photoshop应用程序实例
-        /// 性能优化：避免频繁创建/释放COM对象
-        /// </summary>
-        private static dynamic GetCachedPhotoshopApplication()
-        {
-            lock (_lockObject)
-            {
-                if (_cachedPsApp == null)
-                {
-                    Type? type = Type.GetTypeFromProgID(PHOTOSHOP_PROGID);
-                    if (type == null)
-                    {
-                        throw new Exception("未找到 Photoshop COM 接口");
-                    }
-                    _cachedPsApp = Activator.CreateInstance(type);
-                }
-                return _cachedPsApp;
-            }
-        }
-
-        /// <summary>
-        /// 静默执行脚本 - 极速模式（0开销）+ 自动焦点返回
-        /// Adobe官方最佳实践：使用缓存COM对象 + 零包装执行
-        /// 性能优化：移除所有非必要代码，追求极致速度
-        /// 焦点优化：执行完后自动返回Photoshop，不打断工作流
+        /// 静默执行 Photoshop 脚本（不弹框），但会做一次“缓存失效重试”，提高兼容性
         /// </summary>
         public static string ExecuteScriptSilently(string scriptCode)
         {
+            if (string.IsNullOrWhiteSpace(scriptCode))
+                return string.Empty;
+
             try
             {
-                // 直接使用缓存对象，无额外检查，速度最快
-                var result = GetCachedPhotoshopApplication().DoJavaScript(scriptCode)?.ToString() ?? string.Empty;
-                
-                // 【焦点优化】执行完脚本后，自动将焦点返回到Photoshop
-                // 这样用户可以立即使用Photoshop快捷键，不需要手动点击
-                System.Threading.Tasks.Task.Run(() => 
+                var app = GetCachedPhotoshopApplication();
+                if (app == null)
+                    return string.Empty;
+
+                try
                 {
-                    // 短暂延迟，确保脚本完全执行完毕
-                    System.Threading.Thread.Sleep(50);
-                    WindowsApiHelper.ActivatePhotoshopWindow();
-                });
-                
-                return result;
+                    string result = app.DoJavaScript(scriptCode);
+                    LastError = null;
+
+                    // 执行完脚本后，尽量把焦点还给 Photoshop（避免打断工作流）
+                    System.Threading.Tasks.Task.Run(() =>
+                    {
+                        Thread.Sleep(50);
+                        WindowsApiHelper.ActivatePhotoshopWindow();
+                    });
+
+                    return result ?? string.Empty;
+                }
+                catch (Exception ex1)
+                {
+                    // 常见场景：Photoshop 重启后旧的 COM 代理失效 / RPC 断开
+                    LastError = $"DoJavaScript 失败（将重试一次）：{ex1.Message}";
+                    InvalidateCache();
+
+                    var app2 = GetCachedPhotoshopApplication();
+                    if (app2 == null)
+                        return string.Empty;
+
+                    try
+                    {
+                        string result2 = app2.DoJavaScript(scriptCode);
+                        LastError = null;
+
+                        System.Threading.Tasks.Task.Run(() =>
+                        {
+                            Thread.Sleep(50);
+                            WindowsApiHelper.ActivatePhotoshopWindow();
+                        });
+
+                        return result2 ?? string.Empty;
+                    }
+                    catch (Exception ex2)
+                    {
+                        LastError = $"DoJavaScript 重试仍失败：{ex2.Message}";
+
+                        System.Threading.Tasks.Task.Run(() =>
+                        {
+                            Thread.Sleep(50);
+                            WindowsApiHelper.ActivatePhotoshopWindow();
+                        });
+
+                        return string.Empty;
+                    }
+                }
             }
-            catch
+            catch (Exception ex)
             {
-                // 即使脚本执行失败，也尝试返回焦点
-                System.Threading.Tasks.Task.Run(() => 
+                LastError = $"静默执行异常：{ex.Message}";
+
+                System.Threading.Tasks.Task.Run(() =>
                 {
-                    System.Threading.Thread.Sleep(50);
+                    Thread.Sleep(50);
                     WindowsApiHelper.ActivatePhotoshopWindow();
                 });
-                
+
                 return string.Empty;
             }
         }
-        
+
         /// <summary>
-        /// 预热COM连接 - 首次启动时调用
-        /// 提前建立Photoshop COM连接，避免第一次执行时的延迟
+        /// 预热 COM 连接（尽量在 STA 线程执行），减少首次执行脚本的冷启动开销
         /// </summary>
         public static void WarmUpConnection()
         {
             try
             {
-                GetCachedPhotoshopApplication();
+                var t = new Thread(() =>
+                {
+                    try { GetCachedPhotoshopApplication(); } catch { }
+                })
+                { IsBackground = true };
+
+                try { t.SetApartmentState(ApartmentState.STA); } catch { }
+                t.Start();
+
+                // 给一点时间预热；不阻塞过久
+                t.Join(1500);
             }
             catch
             {
@@ -182,84 +508,31 @@ namespace Kuaijiejian
             }
         }
 
-
         /// <summary>
-        /// 释放缓存的COM对象
-        /// 在应用程序退出时调用
+        /// 释放缓存的 COM 对象（程序退出时调用）
         /// </summary>
         public static void ReleaseCachedResources()
         {
-            lock (_lockObject)
-            {
-                if (_cachedPsApp != null)
-                {
-                    try
-                    {
-                        // 强制释放COM对象
-                        Marshal.FinalReleaseComObject(_cachedPsApp);
-                        _cachedPsApp = null;
-                    }
-                    catch
-                    {
-                        // 即使释放失败也继续
-                        _cachedPsApp = null;
-                    }
-                }
-            }
+            InvalidateCache();
         }
 
+
+        
         /// <summary>
-        /// 执行 JSX 脚本文件
+        /// Escape 单引号/反斜杠等，避免拼接到 JSX 字符串时语法错误
         /// </summary>
-        public static string ExecuteScriptFile(string scriptFilePath)
+        private static string EscapeJSString(string value)
         {
-            if (!System.IO.File.Exists(scriptFilePath))
-            {
-                throw new System.IO.FileNotFoundException($"脚本文件不存在：{scriptFilePath}");
-            }
-
-            string scriptCode = System.IO.File.ReadAllText(scriptFilePath);
-            return ExecuteScript(scriptCode);
+            if (value == null) return string.Empty;
+            return value
+                .Replace("\\", "\\\\")
+                .Replace("'", "\\'")
+                .Replace("\r", "\\r")
+                .Replace("\n", "\\n");
         }
 
-        /// <summary>
-        /// 播放 Photoshop 动作
-        /// Adobe 官方方法：app.doAction(actionName, actionSetName)
-        /// </summary>
-        public static void PlayAction(string actionName, string actionSetName)
-        {
-            if (string.IsNullOrEmpty(actionName) || string.IsNullOrEmpty(actionSetName))
-            {
-                throw new ArgumentException("动作名称和动作集名称不能为空");
-            }
-
-            string script = $@"
-try {{
-    app.displayDialogs = DialogModes.ALL;
-    app.doAction('{EscapeJSString(actionName)}', '{EscapeJSString(actionSetName)}');
-    'SUCCESS';
-}} catch (e) {{
-    if (e.number === 8007) {{
-        'USER_CANCELLED';
-    }} else {{
-        throw e;
-    }}
-}}";
-
-            string result = ExecuteScript(script);
-            
-            if (result == "USER_CANCELLED")
-            {
-                throw new OperationCanceledException("用户取消了操作");
-            }
-        }
-
-        /// <summary>
-        /// 获取所有 Photoshop 动作
-        /// 使用 ActionManager API - Adobe 官方推荐方法
-        /// 完全参考成功项目的实现
-        /// ⚠️ 警告：此方法已验证可用，请勿修改！⚠️
-        /// 参考项目：D:\xwechat_files\wxid_gan9e9jw72z022_2753\msg\file\2025-10\kuaijiejian\kuaijiejian\PS快速工具\ActionPickerDialog.cs
+/// <summary>
+        /// 获取 Photoshop 中所有动作信息（Action Sets / Actions）
         /// </summary>
         public static List<PhotoshopActionInfo> GetAllActions()
         {
@@ -267,117 +540,156 @@ try {{
 
             try
             {
-                // ========================================
-                // ⚠️ 以下脚本代码已验证可用，请勿修改 ⚠️
-                // 参考：成功项目 ActionPickerDialog.cs
-                // ========================================
-                
-                // Adobe官方推荐的Action Manager API方法
-                string script = @"
-(function() {
-    try {
-        var result = [];
-        
-        // 创建引用获取动作集数量
-        var ref = new ActionReference();
-        ref.putProperty(stringIDToTypeID('property'), stringIDToTypeID('numberOfActionSets'));
-        ref.putEnumerated(stringIDToTypeID('application'), charIDToTypeID('Ordn'), charIDToTypeID('Trgt'));
-        
-        var desc;
-        try {
-            desc = executeActionGet(ref);
-        } catch(e) {
-            return '';  // 没有动作集时返回空
-        }
-        
-        var actionSetCount = desc.getInteger(stringIDToTypeID('numberOfActionSets'));
-        
-        // 遍历每个动作集
-        for (var i = 0; i < actionSetCount; i++) {
-            try {
-                var refSet = new ActionReference();
-                refSet.putIndex(stringIDToTypeID('actionSet'), i + 1);
-                var descSet = executeActionGet(refSet);
-                var actionSetName = descSet.getString(stringIDToTypeID('name'));
-                
-                // 获取当前动作集中的动作数量
-                var numberOfActions = descSet.getInteger(stringIDToTypeID('numberOfChildren'));
-                
-                // 遍历当前动作集中的每个动作
-                for (var j = 0; j < numberOfActions; j++) {
-                    try {
-                        var refAction = new ActionReference();
-                        refAction.putIndex(stringIDToTypeID('action'), j + 1);
-                        refAction.putIndex(stringIDToTypeID('actionSet'), i + 1);
-                        var descAction = executeActionGet(refAction);
-                        var actionName = descAction.getString(stringIDToTypeID('name'));
-                        
-                        result.push(actionSetName + '|' + actionName);
-                    } catch(e) {}
-                }
-            } catch(e) {}
-        }
-        
-        return result.join(';;');
-    } catch(e) {
-        return 'ERROR:' + e.toString();
-    }
-})();";
-                // ========================================
-                // ⚠️ 脚本代码结束，以上代码请勿修改 ⚠️
-                // ========================================
+                dynamic? app = GetCachedPhotoshopApplication();
+                if (app == null)
+                    return actions;
 
-                System.Diagnostics.Debug.WriteLine("[PS] 执行 Photoshop 脚本获取动作...");
-                string result = ExecuteScript(script);
-                System.Diagnostics.Debug.WriteLine($"[PS] 脚本返回结果: {result}");
+                // 获取动作集数量
+                int actionSetCount = app.ActionSets.Count;
 
-                if (result.StartsWith("ERROR:"))
+                for (int i = 1; i <= actionSetCount; i++)
                 {
-                    throw new Exception(result.Substring(6));
-                }
+                    dynamic actionSet = app.ActionSets[i];
+                    string setName = actionSet.Name;
 
-                if (string.IsNullOrWhiteSpace(result))
-                {
-                    throw new Exception("未找到任何动作\n请在Photoshop的动作面板中创建或加载动作");
-                }
+                    // 获取动作数量
+                    int actionCount = actionSet.Actions.Count;
 
-                // 解析结果
-                var actionPairs = result.Split(new[] { ";;" }, StringSplitOptions.RemoveEmptyEntries);
-                foreach (var pair in actionPairs)
-                {
-                    var parts = pair.Split('|');
-                    if (parts.Length == 2)
+                    for (int j = 1; j <= actionCount; j++)
                     {
+                        dynamic action = actionSet.Actions[j];
+                        string actionName = action.Name;
+
                         actions.Add(new PhotoshopActionInfo
                         {
-                            ActionSetName = parts[0].Trim(),
-                            ActionName = parts[1].Trim()
+                            ActionSetName = setName,
+                            ActionName = actionName
                         });
                     }
                 }
-
-                System.Diagnostics.Debug.WriteLine($"[PS] 成功解析 {actions.Count} 个动作");
             }
-            catch (Exception ex)
+            catch
             {
-                System.Diagnostics.Debug.WriteLine($"[PS] 获取动作失败: {ex.Message}");
-                throw;
+                // 保持静默，调用方决定是否提示
             }
 
             return actions;
         }
 
         /// <summary>
-        /// 转义 JavaScript 字符串
-        /// 防止注入攻击 - 安全最佳实践
+        /// 执行 Photoshop 动作（app.DoAction）
         /// </summary>
-        private static string EscapeJSString(string str)
+        public static bool PlayAction(string actionName, string actionSetName)
         {
-            return str.Replace("\\", "\\\\")
-                      .Replace("'", "\\'")
-                      .Replace("\"", "\\\"")
-                      .Replace("\r", "\\r")
-                      .Replace("\n", "\\n");
+            try
+            {
+                if (string.IsNullOrWhiteSpace(actionName) || string.IsNullOrWhiteSpace(actionSetName))
+                    return false;
+
+                string script = $@"
+try {{
+    app.displayDialogs = DialogModes.ALL;
+    app.doAction('{EscapeJSString(actionName)}', '{EscapeJSString(actionSetName)}');
+}} catch(e) {{}}
+";
+                ExecuteScriptSilently(script);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                LastError = $"执行动作失败：{ex.Message}";
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 获取当前活动文档名称
+        /// </summary>
+        public static string GetActiveDocumentName()
+        {
+            try
+            {
+                dynamic? app = GetCachedPhotoshopApplication();
+                if (app == null)
+                    return string.Empty;
+
+                if (app.Documents.Count > 0)
+                    return app.ActiveDocument.Name;
+
+                return string.Empty;
+            }
+            catch
+            {
+                return string.Empty;
+            }
+        }
+
+        /// <summary>
+        /// 检查是否有打开的文档
+        /// </summary>
+        public static bool HasOpenDocument()
+        {
+            try
+            {
+                dynamic? app = GetCachedPhotoshopApplication();
+                if (app == null)
+                    return false;
+
+                return app.Documents.Count > 0;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 获取当前选中的图层名称
+        /// </summary>
+        public static string GetActiveLayerName()
+        {
+            try
+            {
+                dynamic? app = GetCachedPhotoshopApplication();
+                if (app == null)
+                    return string.Empty;
+
+                if (app.Documents.Count > 0)
+                    return app.ActiveDocument.ActiveLayer.Name;
+
+                return string.Empty;
+            }
+            catch
+            {
+                return string.Empty;
+            }
+        }
+
+        /// <summary>
+        /// 获取 Photoshop 版本信息
+        /// </summary>
+        public static string GetPhotoshopVersion()
+        {
+            try
+            {
+                dynamic? app = GetCachedPhotoshopApplication();
+                if (app == null)
+                    return string.Empty;
+
+                return app.Version;
+            }
+            catch
+            {
+                return string.Empty;
+            }
+        }
+
+        /// <summary>
+        /// 强制释放缓存的 COM 对象（例如在设置页面提供“重连”按钮时调用）
+        /// </summary>
+        public static void ResetComCache()
+        {
+            InvalidateCache();
         }
     }
 }
