@@ -14,8 +14,6 @@ namespace Kuaijiejian
     public partial class BatchDeleteWindow : Window
     {
         private ObservableCollection<FunctionItemViewModel> _items;
-        private int _lastSelectedIndex = -1;
-        
         /// <summary>
         /// 选中的功能项
         /// </summary>

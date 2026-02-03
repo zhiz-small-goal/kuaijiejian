@@ -14,7 +14,7 @@ namespace Kuaijiejian
     public partial class ActionSelectorWindow : Window
     {
         private List<ActionItemViewModel> _actionItems;
-        private List<ActionItemViewModel> _allActionItems; // 存储所有动作用于搜索
+        private List<ActionItemViewModel> _allActionItems = new(); // 存储所有动作用于搜索
 
         /// <summary>
         /// 选中的动作列表

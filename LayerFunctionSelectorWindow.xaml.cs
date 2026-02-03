@@ -9,7 +9,7 @@ namespace Kuaijiejian
     public partial class LayerFunctionSelectorWindow : Window
     {
         public List<LayerFunctionViewModel> SelectedFunctions { get; private set; }
-        private List<LayerFunctionViewModel> _allFunctions; // 存储所有功能用于搜索
+        private List<LayerFunctionViewModel> _allFunctions = new(); // 存储所有功能用于搜索
 
         // 定义事件：当用户确认添加功能时触发
         public event EventHandler<List<LayerFunctionViewModel>>? FunctionsConfirmed;
@@ -513,18 +513,24 @@ var d=new ActionDescriptor();d.putClass(charIDToTypeID('Nw  '),charIDToTypeID('C
 
         private void SelectAll_Click(object sender, RoutedEventArgs e)
         {
-            foreach (var item in FunctionsList.ItemsSource as List<LayerFunctionViewModel>)
+            if (FunctionsList.ItemsSource is List<LayerFunctionViewModel> list)
             {
-                item.IsSelected = true;
+                foreach (var item in list)
+                {
+                    item.IsSelected = true;
+                }
             }
             UpdateSelectionCount();
         }
 
         private void DeselectAll_Click(object sender, RoutedEventArgs e)
         {
-            foreach (var item in FunctionsList.ItemsSource as List<LayerFunctionViewModel>)
+            if (FunctionsList.ItemsSource is List<LayerFunctionViewModel> list)
             {
-                item.IsSelected = false;
+                foreach (var item in list)
+                {
+                    item.IsSelected = false;
+                }
             }
             UpdateSelectionCount();
         }

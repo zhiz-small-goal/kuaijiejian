@@ -31,7 +31,60 @@ namespace Kuaijiejian
         /// </summary>
         public static string? LastError { get; private set; }
 
-        #region ProgID/COM 解析（兼容多版本并存）
+        
+        /// <summary>
+        /// 尝试连接到正在运行的 Photoshop COM 对象（Running Object Table）。
+        /// 注意：在部分 .NET 目标框架下 Marshal.GetActiveObject 可能不可用，因此这里使用 P/Invoke 调用原生 COM API。
+        /// 若不存在运行实例或未注册到 ROT，返回 null。
+        /// </summary>
+        private static dynamic? TryGetActiveObjectSafe(string progId)
+        {
+            try
+            {
+                return ComRot.TryGetActiveObjectFromProgId(progId);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// 通过原生 COM API 访问 ROT，避免依赖 Marshal.GetActiveObject（在部分目标框架中缺失该封装）
+        /// </summary>
+        private static class ComRot
+        {
+            [DllImport("ole32.dll", CharSet = CharSet.Unicode)]
+            private static extern int CLSIDFromProgIDEx(string lpszProgID, out Guid pclsid);
+
+            [DllImport("ole32.dll", CharSet = CharSet.Unicode)]
+            private static extern int CLSIDFromProgID(string lpszProgID, out Guid pclsid);
+
+            [DllImport("oleaut32.dll", PreserveSig = true)]
+            private static extern int GetActiveObject(ref Guid rclsid, IntPtr pvReserved,
+                [MarshalAs(UnmanagedType.IUnknown)] out object ppunk);
+
+            public static object? TryGetActiveObjectFromProgId(string progId)
+            {
+                if (string.IsNullOrWhiteSpace(progId)) return null;
+
+                Guid clsid;
+                int hr = CLSIDFromProgIDEx(progId, out clsid);
+                if (hr != 0)
+                    hr = CLSIDFromProgID(progId, out clsid);
+                if (hr != 0)
+                    return null;
+
+                object unk;
+                hr = GetActiveObject(ref clsid, IntPtr.Zero, out unk);
+                if (hr != 0)
+                    return null;
+
+                return unk;
+            }
+        }
+
+#region ProgID/COM 解析（兼容多版本并存）
 
         /// <summary>
         /// 尝试获取正在运行的 Photoshop 进程对应的产品版本（主/次版本即可）。
@@ -328,7 +381,13 @@ namespace Kuaijiejian
                     InvalidateCache_NoLock();
 
                     // 创建新对象并缓存
-                    _cachedPsApp = Activator.CreateInstance(comType);
+                    // 优先连接已运行实例（ROT）；失败再创建新实例
+                    _cachedPsApp = TryGetActiveObjectSafe(progId);
+                    if (_cachedPsApp == null && !string.Equals(progId, PHOTOSHOP_BASE_PROGID, StringComparison.OrdinalIgnoreCase))
+                        _cachedPsApp = TryGetActiveObjectSafe(PHOTOSHOP_BASE_PROGID);
+
+                    if (_cachedPsApp == null)
+                        _cachedPsApp = Activator.CreateInstance(comType);
                     _cachedComType = comType;
                     _cachedProgId = progId;
 
@@ -540,37 +599,105 @@ namespace Kuaijiejian
 
             try
             {
-                dynamic? app = GetCachedPhotoshopApplication();
-                if (app == null)
-                    return actions;
+                // 说明：
+                // 1) 直接访问 COM 对象的 ActionSets/Actions 集合在部分版本（例如 PS 2021）不可用或行为不一致。
+                // 2) 使用 ExtendScript(Action Manager) 在 Photoshop 内部枚举动作，兼容性更好。
+                //
+                // 实现策略：
+                // - 用 charID 常量（ASet/Actn/Nm  /NmbC）循环枚举动作集与子动作；
+                // - 不依赖 “numberOfActionSets” 之类属性，避免版本差异；
+                // - 返回 "set|action;;set|action" 的扁平字符串给 C# 解析。
+                string script = @"
+(function () {
+    try {
+        function cTID(s) { return app.charIDToTypeID(s); }
 
-                // 获取动作集数量
-                int actionSetCount = app.ActionSets.Count;
+        var result = [];
+        var i = 1;
 
-                for (int i = 1; i <= actionSetCount; i++)
+        while (true) {
+            if (i > 5000) break; // 防御：避免异常环境下死循环
+
+            var refSet = new ActionReference();
+            refSet.putIndex(cTID('ASet'), i);
+
+            var descSet;
+            try {
+                descSet = executeActionGet(refSet);
+            } catch (e) {
+                break; // i 超出范围时会抛错，结束枚举
+            }
+
+            var setName = '';
+            try {
+                setName = descSet.getString(cTID('Nm  '));
+            } catch (e) {
+                setName = '';
+            }
+
+            var numberOfChildren = 0;
+            try {
+                numberOfChildren = descSet.getInteger(cTID('NmbC')); // numberOfChildren
+            } catch (e) {
+                numberOfChildren = 0;
+            }
+
+            for (var j = 1; j <= numberOfChildren; j++) {
+                var refAction = new ActionReference();
+                refAction.putIndex(cTID('Actn'), j);
+                refAction.putIndex(cTID('ASet'), i);
+
+                try {
+                    var descAction = executeActionGet(refAction);
+                    var actionName = descAction.getString(cTID('Nm  '));
+
+                    if (setName && actionName) {
+                        result.push(setName + '|' + actionName);
+                    }
+                } catch (e) { }
+            }
+
+            i++;
+        }
+
+        return result.join(';;');
+    } catch (e) {
+        return 'ERROR:' + e.toString();
+    }
+})();
+";
+
+                string result = ExecuteScriptSilently(script);
+
+                if (!string.IsNullOrWhiteSpace(result) && result.StartsWith("ERROR:", StringComparison.OrdinalIgnoreCase))
                 {
-                    dynamic actionSet = app.ActionSets[i];
-                    string setName = actionSet.Name;
+                    LastError = result;
+                    return actions;
+                }
 
-                    // 获取动作数量
-                    int actionCount = actionSet.Actions.Count;
+                if (string.IsNullOrWhiteSpace(result))
+                {
+                    // 可能确实没有载入动作，也可能脚本被阻止/执行失败但未返回错误
+                    return actions;
+                }
 
-                    for (int j = 1; j <= actionCount; j++)
+                var pairs = result.Split(new[] { ";;" }, StringSplitOptions.RemoveEmptyEntries);
+                foreach (var pair in pairs)
+                {
+                    var parts = pair.Split('|');
+                    if (parts.Length == 2)
                     {
-                        dynamic action = actionSet.Actions[j];
-                        string actionName = action.Name;
-
                         actions.Add(new PhotoshopActionInfo
                         {
-                            ActionSetName = setName,
-                            ActionName = actionName
+                            ActionSetName = parts[0].Trim(),
+                            ActionName = parts[1].Trim()
                         });
                     }
                 }
             }
-            catch
+            catch (Exception ex)
             {
-                // 保持静默，调用方决定是否提示
+                LastError = $"获取动作列表失败：{ex.Message}";
             }
 
             return actions;
