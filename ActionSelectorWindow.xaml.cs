@@ -79,12 +79,17 @@ namespace Kuaijiejian
                             EmptyPanel.Visibility = Visibility.Visible;
                             
                             // 根据错误类型显示不同的提示
+                            string diagnostics = string.IsNullOrWhiteSpace(PhotoshopHelper.LastError)
+                                ? string.Empty
+                                : $"\n自动化诊断：\n{PhotoshopHelper.LastError}\n";
+
                             var result = System.Windows.MessageBox.Show(
                                 "未检测到 Photoshop 动作。\n\n" +
                                 "可能的原因：\n" +
                                 "1. 您的 Photoshop 版本可能不支持脚本自动检测\n" +
                                 "2. Actions 面板中没有加载任何动作集\n" +
                                 "3. Photoshop 权限设置阻止了脚本执行\n\n" +
+                                diagnostics +
                                 "解决方案：\n" +
                                 "• 在 Photoshop 中打开 Window → Actions\n" +
                                 "• 点击面板菜单 → Load Actions 加载动作文件\n" +
@@ -302,4 +307,3 @@ namespace Kuaijiejian
         }
     }
 }
-

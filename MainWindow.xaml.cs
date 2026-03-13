@@ -1004,6 +1004,11 @@ private void MainWindow_Loaded(object sender, RoutedEventArgs e)
             
             // 统一使用静默执行，无弹窗
             PhotoshopHelper.ExecuteScriptSilently(scriptCode);
+
+            if (!string.IsNullOrWhiteSpace(PhotoshopHelper.LastError))
+            {
+                throw new Exception(PhotoshopHelper.LastError);
+            }
         }
         
         /// <summary>
@@ -1022,7 +1027,10 @@ private void MainWindow_Loaded(object sender, RoutedEventArgs e)
                 throw new Exception("动作名称或动作集名称未设置。");
             }
             
-            PhotoshopHelper.PlayAction(function.ActionName, function.ActionSetName);
+            if (!PhotoshopHelper.PlayAction(function.ActionName, function.ActionSetName))
+            {
+                throw new Exception(PhotoshopHelper.LastError ?? "执行 Photoshop 动作失败。");
+            }
         }
 
         /// <summary>
@@ -1648,7 +1656,6 @@ private void MainWindow_Loaded(object sender, RoutedEventArgs e)
 #endregion
     }
 }
-
 
 
 

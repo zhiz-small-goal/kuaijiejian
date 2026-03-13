@@ -2,7 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
+using System.Text;
 using System.Threading;
 using Microsoft.Win32;
 
@@ -20,16 +22,31 @@ namespace Kuaijiejian
     public static class PhotoshopHelper
     {
         private const string PHOTOSHOP_BASE_PROGID = "Photoshop.Application";
+        private const int TYPE_E_CANTLOADLIBRARY = unchecked((int)0x80029C4A);
 
         private static readonly object _comLock = new();
+        private static readonly object _scriptHostLock = new();
         private static dynamic? _cachedPsApp = null;
         private static string? _cachedProgId = null;
         private static Type? _cachedComType = null;
+        private static int? _cachedOwnerThreadId = null;
+        private static ApartmentState _cachedOwnerApartment = ApartmentState.Unknown;
+        private static string? _scriptHostRunnerPath = null;
 
         /// <summary>
         /// 最近一次 COM 失败信息（用于诊断；不保证线程安全的强一致性）
         /// </summary>
         public static string? LastError { get; private set; }
+
+        private sealed class AutomationRegistrationInfo
+        {
+            public string ProgId { get; set; } = string.Empty;
+            public string? Clsid { get; set; }
+            public string? LocalServerPath { get; set; }
+            public string? TypeLibId { get; set; }
+            public string? RegisteredTypeLibPath { get; set; }
+            public string? ExpectedTypeLibPath { get; set; }
+        }
 
         
         /// <summary>
@@ -84,6 +101,289 @@ namespace Kuaijiejian
             }
         }
 
+        private static void ReturnFocusToPhotoshopAsync()
+        {
+            System.Threading.Tasks.Task.Run(() =>
+            {
+                Thread.Sleep(50);
+                WindowsApiHelper.ActivatePhotoshopWindow();
+            });
+        }
+
+        private static bool IsTypeLibraryFailure(Exception? ex)
+        {
+            while (ex != null)
+            {
+                if (ex is COMException comEx && comEx.HResult == TYPE_E_CANTLOADLIBRARY)
+                    return true;
+
+                ex = ex.InnerException;
+            }
+
+            return false;
+        }
+
+        private static string NormalizeScriptHostOutput(string output)
+        {
+            return output
+                .Replace("\uFEFF", string.Empty)
+                .TrimEnd('\r', '\n');
+        }
+
+        private static string? ExtractExecutablePath(string? commandLine)
+        {
+            if (string.IsNullOrWhiteSpace(commandLine))
+                return null;
+
+            string trimmed = commandLine.Trim();
+            if (trimmed.StartsWith("\"", StringComparison.Ordinal))
+            {
+                int endQuote = trimmed.IndexOf('"', 1);
+                if (endQuote > 1)
+                    return trimmed.Substring(1, endQuote - 1);
+            }
+
+            int exeIndex = trimmed.IndexOf(".exe", StringComparison.OrdinalIgnoreCase);
+            if (exeIndex >= 0)
+                return trimmed.Substring(0, exeIndex + 4).Trim();
+
+            return trimmed;
+        }
+
+        private static string? TryReadTypeLibPath(RegistryKey baseKey, string typeLibId)
+        {
+            try
+            {
+                using var typeLibRoot = baseKey.OpenSubKey($@"TypeLib\{typeLibId}");
+                if (typeLibRoot == null)
+                    return null;
+
+                var versionNames = typeLibRoot.GetSubKeyNames()
+                    .OrderByDescending(v => v, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                foreach (var version in versionNames)
+                {
+                    foreach (var platform in new[] { "win64", "win32" })
+                    {
+                        using var platformKey = typeLibRoot.OpenSubKey($@"{version}\0\{platform}");
+                        var path = platformKey?.GetValue(null) as string;
+                        if (!string.IsNullOrWhiteSpace(path))
+                            return path.Trim();
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            return null;
+        }
+
+        private static bool TryGetAutomationRegistrationInfo(string progId, out AutomationRegistrationInfo? info)
+        {
+            info = null;
+            if (string.IsNullOrWhiteSpace(progId))
+                return false;
+
+            foreach (var view in new[] { RegistryView.Registry64, RegistryView.Registry32 })
+            {
+                try
+                {
+                    using var baseKey = RegistryKey.OpenBaseKey(RegistryHive.ClassesRoot, view);
+                    using var progKey = baseKey.OpenSubKey(progId);
+                    if (progKey == null)
+                        continue;
+
+                    string? clsid = progKey.OpenSubKey("CLSID")?.GetValue(null) as string;
+                    if (string.IsNullOrWhiteSpace(clsid))
+                        continue;
+
+                    using var clsidKey = baseKey.OpenSubKey($@"CLSID\{clsid}");
+                    string? localServerCommandLine = clsidKey?.OpenSubKey("LocalServer32")?.GetValue(null) as string;
+                    string? localServerPath = ExtractExecutablePath(localServerCommandLine);
+
+                    string? typeLibId = clsidKey?.OpenSubKey("TypeLib")?.GetValue(null) as string;
+                    string? registeredTypeLibPath = string.IsNullOrWhiteSpace(typeLibId)
+                        ? null
+                        : TryReadTypeLibPath(baseKey, typeLibId);
+
+                    string? expectedTypeLibPath = null;
+                    if (!string.IsNullOrWhiteSpace(localServerPath))
+                    {
+                        string? installDir = Path.GetDirectoryName(localServerPath);
+                        if (!string.IsNullOrWhiteSpace(installDir))
+                        {
+                            expectedTypeLibPath = Path.Combine(
+                                installDir,
+                                "Required",
+                                "Plug-ins",
+                                "Extensions",
+                                "ScriptingSupport.8li");
+                        }
+                    }
+
+                    info = new AutomationRegistrationInfo
+                    {
+                        ProgId = progId,
+                        Clsid = clsid,
+                        LocalServerPath = localServerPath,
+                        TypeLibId = typeLibId,
+                        RegisteredTypeLibPath = registeredTypeLibPath,
+                        ExpectedTypeLibPath = expectedTypeLibPath
+                    };
+
+                    return true;
+                }
+                catch
+                {
+                }
+            }
+
+            return false;
+        }
+
+        private static string? GetScriptHostFallbackReason(string? progId, Exception? ex = null)
+        {
+            if (IsTypeLibraryFailure(ex))
+                return $"Photoshop 自动化类型库调用失败：{ex?.Message}";
+
+            if (string.IsNullOrWhiteSpace(progId))
+                return null;
+
+            if (!TryGetAutomationRegistrationInfo(progId, out var info) || info == null)
+                return null;
+
+            if (string.IsNullOrWhiteSpace(info.RegisteredTypeLibPath))
+                return null;
+
+            if (File.Exists(info.RegisteredTypeLibPath))
+                return null;
+
+            if (!string.IsNullOrWhiteSpace(info.ExpectedTypeLibPath) && File.Exists(info.ExpectedTypeLibPath))
+            {
+                return $"检测到 Photoshop 自动化类型库注册指向缺失文件：{info.RegisteredTypeLibPath}；当前安装目录存在可用脚本支持文件：{info.ExpectedTypeLibPath}";
+            }
+
+            return $"检测到 Photoshop 自动化类型库注册指向缺失文件：{info.RegisteredTypeLibPath}";
+        }
+
+        private static string EnsureScriptHostRunnerPath()
+        {
+            lock (_scriptHostLock)
+            {
+                string bridgeDir = Path.Combine(Path.GetTempPath(), "Kuaijiejian", "PhotoshopBridge");
+                Directory.CreateDirectory(bridgeDir);
+
+                string runnerPath = Path.Combine(bridgeDir, "PhotoshopRunner.vbs");
+                const string runnerCode = @"On Error Resume Next
+Dim appRef
+Dim result
+Dim scriptPath
+Dim scriptText
+Dim stream
+scriptPath = WScript.Arguments(0)
+
+Set appRef = GetObject(, ""Photoshop.Application"")
+If Err.Number <> 0 Then
+    Err.Clear
+    Set appRef = CreateObject(""Photoshop.Application"")
+End If
+
+If Err.Number <> 0 Then
+    WScript.StdErr.WriteLine ""ERROR:CREATE:"" & Err.Description
+    WScript.Quit 2
+End If
+
+Set stream = CreateObject(""ADODB.Stream"")
+If Err.Number <> 0 Then
+    WScript.StdErr.WriteLine ""ERROR:STREAM:"" & Err.Description
+    WScript.Quit 4
+End If
+
+stream.Type = 2
+stream.Charset = ""utf-8""
+stream.Open
+stream.LoadFromFile scriptPath
+scriptText = stream.ReadText(-1)
+stream.Close
+
+result = appRef.DoJavaScript(scriptText)
+If Err.Number <> 0 Then
+    WScript.StdErr.WriteLine ""ERROR:EXEC:"" & Err.Description
+    WScript.Quit 3
+End If
+
+If IsNull(result) Then
+    WScript.Echo """"
+Else
+    WScript.Echo CStr(result)
+End If
+";
+
+                File.WriteAllText(runnerPath, runnerCode, Encoding.ASCII);
+                _scriptHostRunnerPath = runnerPath;
+                return runnerPath;
+            }
+        }
+
+        private static string ExecuteScriptViaScriptHost(string scriptCode, string reason)
+        {
+            string bridgeDir = Path.Combine(Path.GetTempPath(), "Kuaijiejian", "PhotoshopBridge");
+            Directory.CreateDirectory(bridgeDir);
+
+            string scriptPath = Path.Combine(bridgeDir, $"script-{Guid.NewGuid():N}.jsx");
+            File.WriteAllText(scriptPath, scriptCode, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+
+            try
+            {
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "cscript.exe",
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true
+                };
+
+                psi.ArgumentList.Add("//Nologo");
+                psi.ArgumentList.Add(EnsureScriptHostRunnerPath());
+                psi.ArgumentList.Add(scriptPath);
+
+                using var process = Process.Start(psi);
+                if (process == null)
+                {
+                    LastError = $"无法启动 cscript.exe，兼容模式不可用。原因：{reason}";
+                    return string.Empty;
+                }
+
+                string stdout = process.StandardOutput.ReadToEnd();
+                string stderr = process.StandardError.ReadToEnd();
+                process.WaitForExit();
+
+                if (process.ExitCode != 0)
+                {
+                    string errorText = NormalizeScriptHostOutput(string.IsNullOrWhiteSpace(stderr) ? stdout : stderr);
+                    LastError = string.IsNullOrWhiteSpace(errorText)
+                        ? $"VBScript 兼容模式执行失败。原因：{reason}"
+                        : $"VBScript 兼容模式执行失败：{errorText}";
+                    return string.Empty;
+                }
+
+                LastError = null;
+                return NormalizeScriptHostOutput(stdout);
+            }
+            catch (Exception ex)
+            {
+                LastError = $"VBScript 兼容模式异常：{ex.Message}";
+                return string.Empty;
+            }
+            finally
+            {
+                try { File.Delete(scriptPath); } catch { }
+            }
+        }
+
 #region ProgID/COM 解析（兼容多版本并存）
 
         /// <summary>
@@ -131,6 +431,41 @@ namespace Kuaijiejian
             {
                 return null;
             }
+        }
+
+        /// <summary>
+        /// 尝试获取当前运行中的 Photoshop 可执行文件完整路径。
+        /// </summary>
+        private static string? TryGetRunningPhotoshopExecutablePath()
+        {
+            try
+            {
+                var processes = Process.GetProcessesByName("Photoshop");
+                if (processes == null || processes.Length == 0)
+                    return null;
+
+                var ordered = processes
+                    .OrderByDescending(p => p.MainWindowHandle != IntPtr.Zero)
+                    .ToList();
+
+                foreach (var p in ordered)
+                {
+                    try
+                    {
+                        var path = p.MainModule?.FileName;
+                        if (!string.IsNullOrWhiteSpace(path))
+                            return path;
+                    }
+                    catch
+                    {
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            return null;
         }
 
         /// <summary>
@@ -216,6 +551,44 @@ namespace Kuaijiejian
                 .Distinct(StringComparer.OrdinalIgnoreCase);
         }
 
+        private static IEnumerable<string> EnumerateRegisteredProgIds()
+        {
+            var results = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                PHOTOSHOP_BASE_PROGID
+            };
+
+            foreach (var view in new[] { RegistryView.Registry64, RegistryView.Registry32 })
+            {
+                try
+                {
+                    using var baseKey = RegistryKey.OpenBaseKey(RegistryHive.ClassesRoot, view);
+                    foreach (var name in baseKey.GetSubKeyNames())
+                    {
+                        if (name.Equals(PHOTOSHOP_BASE_PROGID, StringComparison.OrdinalIgnoreCase) ||
+                            name.StartsWith($"{PHOTOSHOP_BASE_PROGID}.", StringComparison.OrdinalIgnoreCase))
+                        {
+                            results.Add(name);
+                        }
+                    }
+                }
+                catch
+                {
+                }
+            }
+
+            return results
+                .OrderBy(name =>
+                {
+                    if (name.Equals(PHOTOSHOP_BASE_PROGID, StringComparison.OrdinalIgnoreCase))
+                        return 0;
+
+                    int segmentCount = name.Split('.').Length;
+                    return segmentCount == 3 ? 1 : 2;
+                })
+                .ThenBy(name => name, StringComparer.OrdinalIgnoreCase);
+        }
+
         /// <summary>
         /// 尝试解析一个可用的 Photoshop COM Type 与对应 ProgID。
         /// preferRunningVersion=true：优先匹配“正在运行的 Photoshop 版本”，用于多版本并存。
@@ -232,6 +605,36 @@ namespace Kuaijiejian
             // 1) 如果要求优先运行版本，则先用进程版本推导候选 ProgID
             if (preferRunningVersion)
             {
+                var runningExePath = TryGetRunningPhotoshopExecutablePath();
+                if (!string.IsNullOrWhiteSpace(runningExePath))
+                {
+                    foreach (var registeredProgId in EnumerateRegisteredProgIds())
+                    {
+                        if (!TryGetAutomationRegistrationInfo(registeredProgId, out var registration) ||
+                            registration == null ||
+                            string.IsNullOrWhiteSpace(registration.LocalServerPath))
+                        {
+                            continue;
+                        }
+
+                        if (!string.Equals(
+                                registration.LocalServerPath,
+                                runningExePath,
+                                StringComparison.OrdinalIgnoreCase))
+                        {
+                            continue;
+                        }
+
+                        var matchedType = Type.GetTypeFromProgID(registeredProgId, throwOnError: false);
+                        if (matchedType != null)
+                        {
+                            comType = matchedType;
+                            progId = registeredProgId;
+                            return true;
+                        }
+                    }
+                }
+
                 var runningVer = TryGetRunningPhotoshopVersion();
                 if (runningVer != null)
                 {
@@ -276,23 +679,21 @@ namespace Kuaijiejian
 
             // 4) 兜底：枚举注册表中所有 Photoshop.Application.*（仅在前面都失败时触发）
             //    这一步开销相对更高，因此放到最后。
-            foreach (var view in new[] { RegistryView.Registry64, RegistryView.Registry32 })
+            foreach (var name in EnumerateRegisteredProgIds())
             {
                 try
                 {
-                    using var baseKey = RegistryKey.OpenBaseKey(RegistryHive.ClassesRoot, view);
-                    foreach (var name in baseKey.GetSubKeyNames())
+                    if (name.Equals(PHOTOSHOP_BASE_PROGID, StringComparison.OrdinalIgnoreCase))
                     {
-                        if (!name.StartsWith($"{PHOTOSHOP_BASE_PROGID}.", StringComparison.OrdinalIgnoreCase))
-                            continue;
+                        continue;
+                    }
 
-                        var t = Type.GetTypeFromProgID(name, throwOnError: false);
-                        if (t != null)
-                        {
-                            comType = t;
-                            progId = name;
-                            return true;
-                        }
+                    var t = Type.GetTypeFromProgID(name, throwOnError: false);
+                    if (t != null)
+                    {
+                        comType = t;
+                        progId = name;
+                        return true;
                     }
                 }
                 catch
@@ -335,7 +736,16 @@ namespace Kuaijiejian
                     return null;
                 }
 
-                // 创建 COM 实例；当目标版本已运行时，多数情况下会回到该实例（取决于 COM 服务器实现）
+                var activeApp = TryGetActiveObjectSafe(progId);
+                if (activeApp == null && !string.Equals(progId, PHOTOSHOP_BASE_PROGID, StringComparison.OrdinalIgnoreCase))
+                    activeApp = TryGetActiveObjectSafe(PHOTOSHOP_BASE_PROGID);
+
+                if (activeApp != null)
+                {
+                    LastError = null;
+                    return activeApp;
+                }
+
                 var app = Activator.CreateInstance(comType);
                 LastError = null;
                 return app;
@@ -368,10 +778,15 @@ namespace Kuaijiejian
                         return null;
                     }
 
+                    int currentThreadId = Environment.CurrentManagedThreadId;
+                    ApartmentState currentApartment = ApartmentState.Unknown;
+                    try { currentApartment = Thread.CurrentThread.GetApartmentState(); } catch { }
+
                     bool needRecreate =
                         _cachedPsApp == null ||
                         _cachedComType == null ||
                         _cachedProgId == null ||
+                        _cachedOwnerThreadId != currentThreadId ||
                         !string.Equals(_cachedProgId, progId, StringComparison.OrdinalIgnoreCase);
 
                     if (!needRecreate)
@@ -390,6 +805,8 @@ namespace Kuaijiejian
                         _cachedPsApp = Activator.CreateInstance(comType);
                     _cachedComType = comType;
                     _cachedProgId = progId;
+                    _cachedOwnerThreadId = currentThreadId;
+                    _cachedOwnerApartment = currentApartment;
 
                     LastError = null;
                     return _cachedPsApp;
@@ -432,17 +849,16 @@ namespace Kuaijiejian
                 _cachedPsApp = null;
                 _cachedProgId = null;
                 _cachedComType = null;
+                _cachedOwnerThreadId = null;
+                _cachedOwnerApartment = ApartmentState.Unknown;
             }
         }
 
         /// <summary>
         /// 执行 Photoshop 脚本（带弹窗/错误抛出）
         /// </summary>
-        public static string ExecuteScript(string scriptCode)
+        private static string ExecuteScriptViaFreshCom(string scriptCode)
         {
-            if (string.IsNullOrWhiteSpace(scriptCode))
-                return string.Empty;
-
             dynamic? app = null;
             try
             {
@@ -450,9 +866,9 @@ namespace Kuaijiejian
                 if (app == null)
                     throw new Exception(LastError ?? "无法获取 Photoshop COM 对象。");
 
-                string result = app.DoJavaScript(scriptCode);
+                object? result = app.DoJavaScript(scriptCode);
                 LastError = null;
-                return result ?? string.Empty;
+                return result?.ToString() ?? string.Empty;
             }
             finally
             {
@@ -460,6 +876,55 @@ namespace Kuaijiejian
                 {
                     try { Marshal.FinalReleaseComObject(app); } catch { }
                 }
+            }
+        }
+
+        private static string ExecuteScriptViaCachedCom(string scriptCode)
+        {
+            var app = GetCachedPhotoshopApplication();
+            if (app == null)
+                throw new Exception(LastError ?? "无法获取 Photoshop COM 对象。");
+
+            object? result = app.DoJavaScript(scriptCode);
+            LastError = null;
+            return result?.ToString() ?? string.Empty;
+        }
+
+        public static string ExecuteScript(string scriptCode)
+        {
+            if (string.IsNullOrWhiteSpace(scriptCode))
+                return string.Empty;
+
+            try
+            {
+                if (TryResolvePhotoshopComType(
+                        preferRunningVersion: true,
+                        out _,
+                        out var progId))
+                {
+                    string? fallbackReason = GetScriptHostFallbackReason(progId);
+                    if (!string.IsNullOrWhiteSpace(fallbackReason))
+                    {
+                        string fallbackResult = ExecuteScriptViaScriptHost(scriptCode, fallbackReason);
+                        if (!string.IsNullOrWhiteSpace(LastError))
+                            throw new Exception(LastError);
+
+                        return fallbackResult;
+                    }
+                }
+
+                return ExecuteScriptViaFreshCom(scriptCode);
+            }
+            catch (Exception ex) when (IsTypeLibraryFailure(ex))
+            {
+                string fallbackResult = ExecuteScriptViaScriptHost(
+                    scriptCode,
+                    GetScriptHostFallbackReason(_cachedProgId, ex) ?? $"Photoshop 自动化调用失败：{ex.Message}");
+
+                if (!string.IsNullOrWhiteSpace(LastError))
+                    throw new Exception(LastError);
+
+                return fallbackResult;
             }
         }
 
@@ -473,57 +938,60 @@ namespace Kuaijiejian
 
             try
             {
-                var app = GetCachedPhotoshopApplication();
-                if (app == null)
-                    return string.Empty;
+                if (TryResolvePhotoshopComType(
+                        preferRunningVersion: true,
+                        out _,
+                        out var progId))
+                {
+                    string? fallbackReason = GetScriptHostFallbackReason(progId);
+                    if (!string.IsNullOrWhiteSpace(fallbackReason))
+                    {
+                        string fallbackResult = ExecuteScriptViaScriptHost(scriptCode, fallbackReason);
+                        ReturnFocusToPhotoshopAsync();
+                        return fallbackResult;
+                    }
+                }
 
                 try
                 {
-                    string result = app.DoJavaScript(scriptCode);
-                    LastError = null;
-
-                    // 执行完脚本后，尽量把焦点还给 Photoshop（避免打断工作流）
-                    System.Threading.Tasks.Task.Run(() =>
-                    {
-                        Thread.Sleep(50);
-                        WindowsApiHelper.ActivatePhotoshopWindow();
-                    });
-
-                    return result ?? string.Empty;
+                    string result = ExecuteScriptViaCachedCom(scriptCode);
+                    ReturnFocusToPhotoshopAsync();
+                    return result;
                 }
                 catch (Exception ex1)
                 {
+                    if (IsTypeLibraryFailure(ex1))
+                    {
+                        string fallbackResult = ExecuteScriptViaScriptHost(
+                            scriptCode,
+                            GetScriptHostFallbackReason(_cachedProgId, ex1) ?? $"Photoshop 自动化调用失败：{ex1.Message}");
+                        ReturnFocusToPhotoshopAsync();
+                        return fallbackResult;
+                    }
+
                     // 常见场景：Photoshop 重启后旧的 COM 代理失效 / RPC 断开
                     LastError = $"DoJavaScript 失败（将重试一次）：{ex1.Message}";
                     InvalidateCache();
 
-                    var app2 = GetCachedPhotoshopApplication();
-                    if (app2 == null)
-                        return string.Empty;
-
                     try
                     {
-                        string result2 = app2.DoJavaScript(scriptCode);
-                        LastError = null;
-
-                        System.Threading.Tasks.Task.Run(() =>
-                        {
-                            Thread.Sleep(50);
-                            WindowsApiHelper.ActivatePhotoshopWindow();
-                        });
-
-                        return result2 ?? string.Empty;
+                        string result2 = ExecuteScriptViaCachedCom(scriptCode);
+                        ReturnFocusToPhotoshopAsync();
+                        return result2;
                     }
                     catch (Exception ex2)
                     {
-                        LastError = $"DoJavaScript 重试仍失败：{ex2.Message}";
-
-                        System.Threading.Tasks.Task.Run(() =>
+                        if (IsTypeLibraryFailure(ex2))
                         {
-                            Thread.Sleep(50);
-                            WindowsApiHelper.ActivatePhotoshopWindow();
-                        });
+                            string fallbackResult = ExecuteScriptViaScriptHost(
+                                scriptCode,
+                                GetScriptHostFallbackReason(_cachedProgId, ex2) ?? $"Photoshop 自动化调用失败：{ex2.Message}");
+                            ReturnFocusToPhotoshopAsync();
+                            return fallbackResult;
+                        }
 
+                        LastError = $"DoJavaScript 重试仍失败：{ex2.Message}";
+                        ReturnFocusToPhotoshopAsync();
                         return string.Empty;
                     }
                 }
@@ -531,13 +999,7 @@ namespace Kuaijiejian
             catch (Exception ex)
             {
                 LastError = $"静默执行异常：{ex.Message}";
-
-                System.Threading.Tasks.Task.Run(() =>
-                {
-                    Thread.Sleep(50);
-                    WindowsApiHelper.ActivatePhotoshopWindow();
-                });
-
+                ReturnFocusToPhotoshopAsync();
                 return string.Empty;
             }
         }
@@ -551,7 +1013,38 @@ namespace Kuaijiejian
             {
                 var t = new Thread(() =>
                 {
-                    try { GetCachedPhotoshopApplication(); } catch { }
+                    dynamic? app = null;
+                    try
+                    {
+                        if (TryResolvePhotoshopComType(
+                                preferRunningVersion: true,
+                                out _,
+                                out var progId))
+                        {
+                            string? fallbackReason = GetScriptHostFallbackReason(progId);
+                            if (!string.IsNullOrWhiteSpace(fallbackReason))
+                            {
+                                ExecuteScriptViaScriptHost("(function(){ return app.version; })();", fallbackReason);
+                                return;
+                            }
+                        }
+
+                        app = GetPhotoshopApplication();
+                        if (app != null)
+                        {
+                            try { app.DoJavaScript("app.version"); } catch { }
+                        }
+                    }
+                    catch
+                    {
+                    }
+                    finally
+                    {
+                        if (app != null && Marshal.IsComObject(app))
+                        {
+                            try { Marshal.FinalReleaseComObject(app); } catch { }
+                        }
+                    }
                 })
                 { IsBackground = true };
 
@@ -714,13 +1207,25 @@ namespace Kuaijiejian
                     return false;
 
                 string script = $@"
-try {{
-    app.displayDialogs = DialogModes.ALL;
-    app.doAction('{EscapeJSString(actionName)}', '{EscapeJSString(actionSetName)}');
-}} catch(e) {{}}
+((function () {{
+    try {{
+        app.displayDialogs = DialogModes.ALL;
+        app.doAction('{EscapeJSString(actionName)}', '{EscapeJSString(actionSetName)}');
+        return 'OK';
+    }} catch(e) {{
+        return 'ERROR:' + e.toString();
+    }}
+}})());
 ";
-                ExecuteScriptSilently(script);
-                return true;
+                string result = ExecuteScriptSilently(script);
+                if (!string.IsNullOrWhiteSpace(result) &&
+                    result.StartsWith("ERROR:", StringComparison.OrdinalIgnoreCase))
+                {
+                    LastError = $"执行动作失败：{result}";
+                    return false;
+                }
+
+                return string.IsNullOrWhiteSpace(LastError);
             }
             catch (Exception ex)
             {
@@ -734,21 +1239,15 @@ try {{
         /// </summary>
         public static string GetActiveDocumentName()
         {
-            try
-            {
-                dynamic? app = GetCachedPhotoshopApplication();
-                if (app == null)
-                    return string.Empty;
-
-                if (app.Documents.Count > 0)
-                    return app.ActiveDocument.Name;
-
-                return string.Empty;
-            }
-            catch
-            {
-                return string.Empty;
-            }
+            return ExecuteScriptSilently(@"
+((function () {
+    try {
+        return app.documents.length > 0 ? app.activeDocument.name : '';
+    } catch (e) {
+        return '';
+    }
+})());
+");
         }
 
         /// <summary>
@@ -756,18 +1255,17 @@ try {{
         /// </summary>
         public static bool HasOpenDocument()
         {
-            try
-            {
-                dynamic? app = GetCachedPhotoshopApplication();
-                if (app == null)
-                    return false;
+            string result = ExecuteScriptSilently(@"
+((function () {
+    try {
+        return app.documents.length > 0 ? '1' : '0';
+    } catch (e) {
+        return '0';
+    }
+})());
+");
 
-                return app.Documents.Count > 0;
-            }
-            catch
-            {
-                return false;
-            }
+            return string.Equals(result?.Trim(), "1", StringComparison.Ordinal);
         }
 
         /// <summary>
@@ -775,21 +1273,15 @@ try {{
         /// </summary>
         public static string GetActiveLayerName()
         {
-            try
-            {
-                dynamic? app = GetCachedPhotoshopApplication();
-                if (app == null)
-                    return string.Empty;
-
-                if (app.Documents.Count > 0)
-                    return app.ActiveDocument.ActiveLayer.Name;
-
-                return string.Empty;
-            }
-            catch
-            {
-                return string.Empty;
-            }
+            return ExecuteScriptSilently(@"
+((function () {
+    try {
+        return app.documents.length > 0 ? app.activeDocument.activeLayer.name : '';
+    } catch (e) {
+        return '';
+    }
+})());
+");
         }
 
         /// <summary>
@@ -797,18 +1289,7 @@ try {{
         /// </summary>
         public static string GetPhotoshopVersion()
         {
-            try
-            {
-                dynamic? app = GetCachedPhotoshopApplication();
-                if (app == null)
-                    return string.Empty;
-
-                return app.Version;
-            }
-            catch
-            {
-                return string.Empty;
-            }
+            return ExecuteScriptSilently("app.version");
         }
 
         /// <summary>
